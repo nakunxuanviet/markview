@@ -1,0 +1,547 @@
+/* ==========================================================================
+   MarkView — base layout
+   Two design languages, one token contract:
+   - dark  = "Aurora"    (glass shell, gradients, pill tabs, soft depth)
+   - light = "Editorial" (warm paper, hairlines, serif display, flat)
+   Tokens live in styles/theme-dark.css and styles/theme-light.css.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Ambient light behind the floating shell (dark only). */
+body[data-theme="dark"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      58% 52% at 8% -10%,
+      rgba(124, 92, 255, 0.4),
+      transparent 62%
+    ),
+    radial-gradient(
+      46% 42% at 96% -6%,
+      rgba(34, 211, 238, 0.22),
+      transparent 62%
+    ),
+    radial-gradient(
+      52% 55% at 72% 112%,
+      rgba(124, 58, 237, 0.24),
+      transparent 64%
+    );
+}
+
+body[data-theme="light"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(90% 70% at 50% -20%, #fffdf8, transparent 72%);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  padding: var(--shell-pad);
+}
+
+.app-shell {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--shell-bg);
+  border: 1px solid var(--shell-border);
+  border-radius: var(--shell-radius);
+  box-shadow: var(--shell-shadow);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: var(--selection-bg);
+}
+
+/* --------------------------------------------------------------------------
+   App bar
+   -------------------------------------------------------------------------- */
+
+#app-bar {
+  flex: none;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-toolbar);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+#app-bar button,
+#app-bar .search-pill,
+#app-bar .view-seg,
+#app-bar .crumb {
+  -webkit-app-region: no-drag;
+}
+
+.appbar-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.bar-sep {
+  width: 1px;
+  height: 20px;
+  flex: none;
+  margin: 0 4px;
+  background: var(--border-color);
+}
+
+/* --------------------------------------------------------------------------
+   Tab bar
+   -------------------------------------------------------------------------- */
+
+#tab-bar {
+  flex: none;
+  height: 40px;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-tabbar);
+  user-select: none;
+}
+
+#tab-list {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+#tab-list::-webkit-scrollbar {
+  height: 0;
+}
+
+.tab-spacer {
+  flex: 1;
+}
+
+/* --------------------------------------------------------------------------
+   Workspace
+   -------------------------------------------------------------------------- */
+
+#main-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+#sidebar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
+}
+
+#sidebar.hidden {
+  display: none;
+}
+
+#sidebar-resizer {
+  flex: none;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+#sidebar-resizer:hover,
+#sidebar-resizer.active {
+  background: var(--accent-color);
+}
+
+#editor-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#editor-preview-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+#editor-panel {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+#cm-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#cm-editor .cm-editor {
+  height: 100%;
+}
+
+#cm-editor .cm-scroller {
+  font-family: var(--font-editor);
+  font-size: var(--font-size-editor);
+  line-height: 1.65;
+}
+
+#editor-preview-resizer {
+  flex: none;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s ease;
+  position: relative;
+  z-index: 3;
+}
+
+#editor-preview-resizer:hover,
+#editor-preview-resizer.active {
+  background: var(--accent-color);
+}
+
+#preview-panel {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  background: var(--bg-preview);
+  border-left: 1px solid var(--border-color);
+}
+
+#preview-panel.hidden {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   Status bar
+   -------------------------------------------------------------------------- */
+
+#status-bar {
+  flex: none;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-statusbar);
+  color: var(--text-muted);
+  font-size: 11px;
+  user-select: none;
+}
+
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.status-right {
+  margin-left: auto;
+}
+
+#status-bar span {
+  white-space: nowrap;
+}
+
+.status-sep {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Zen mode
+   -------------------------------------------------------------------------- */
+
+body.zen-mode #app-bar,
+body.zen-mode #tab-bar,
+body.zen-mode #sidebar,
+body.zen-mode #sidebar-resizer,
+body.zen-mode #status-bar {
+  display: none !important;
+}
+
+body.zen-mode #root {
+  padding: 0;
+}
+
+body.zen-mode .app-shell {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body.zen-mode #main-container {
+  height: 100%;
+}
+
+body.zen-mode #editor-preview-container {
+  justify-content: center;
+  align-items: stretch;
+}
+
+body.zen-mode #editor-panel,
+body.zen-mode #preview-panel {
+  max-width: 920px;
+}
+
+body.zen-mode .pane-bar {
+  display: none;
+}
+
+body.zen-mode #editor-preview-resizer {
+  display: none;
+}
+
+body.zen-mode #preview-panel {
+  border-left: 1px solid var(--border-color);
+}
+
+/* --------------------------------------------------------------------------
+   View modes
+   -------------------------------------------------------------------------- */
+
+body.view-mode-single #editor-preview-resizer {
+  display: none !important;
+}
+
+body.view-mode-single.single-editor #preview-panel {
+  display: none !important;
+}
+
+body.view-mode-single.single-editor #editor-panel {
+  display: flex !important;
+  flex: 1 !important;
+}
+
+body.view-mode-single.single-preview #editor-panel {
+  display: none !important;
+}
+
+body.view-mode-single.single-preview #preview-panel {
+  display: block !important;
+  flex: 1 !important;
+  border-left: 0;
+}
+
+body.view-mode-single.single-preview .preview-bar {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   Scrollbars
+   -------------------------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Drop target + file change banners
+   -------------------------------------------------------------------------- */
+
+body.drag-over::after {
+  content: "Drop files or folders to open";
+  position: fixed;
+  inset: 14px;
+  z-index: 25000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  border: 1.5px dashed var(--accent-color);
+  border-radius: var(--radius-lg);
+  background: var(--drag-overlay);
+  color: var(--text-primary);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.file-change-banner {
+  position: fixed;
+  right: calc(var(--shell-pad) + 16px);
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 460px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--warn-border);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-1);
+  font-size: 12px;
+}
+
+.file-change-banner > span:first-child {
+  position: relative;
+  padding-left: 16px;
+}
+
+.file-change-banner > span:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--warn-color);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
+.file-change-banner button {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.file-change-banner button:hover {
+  background: var(--bg-active);
+}
+
+.file-change-banner .banner-dismiss {
+  padding: 3px 5px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.file-change-banner .banner-dismiss:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* --------------------------------------------------------------------------
+   Narrow windows
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1180px) {
+  .crumb {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .search-pill span,
+  .search-pill kbd {
+    display: none;
+  }
+
+  .search-pill {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+}

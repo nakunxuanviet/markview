@@ -1,0 +1,167 @@
+/* ==========================================================================
+   Editorial — light theme tokens
+   Warm paper, ink hairlines, serif display, terracotta + sage. No shadows.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* Type ---------------------------------------------------------------- */
+  --font-ui:
+    "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system,
+    sans-serif;
+  --font-mono:
+    "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --font-editor: var(--font-mono);
+  --font-preview:
+    "Segoe UI Variable Text", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-display:
+    "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+    "Times New Roman", serif;
+  --font-size-ui: 13px;
+  --font-size-editor: 14px;
+  --font-size-preview: 15px;
+  --label-spacing: 0.16em;
+  --label-transform: uppercase;
+
+  /* Surfaces ------------------------------------------------------------ */
+  --bg-app: #e9e5db;
+  --bg-primary: #fffdf9;
+  --bg-secondary: #faf8f2;
+  --bg-elevated: #fcfaf5;
+  --bg-sidebar: #f3efe5;
+  --bg-toolbar: #fbf9f3;
+  --bg-tabbar: #fbf9f3;
+  --bg-statusbar: #f3efe5;
+  --bg-preview: #fffdf9;
+  --bg-hover: #f2ede2;
+  --bg-active: #ece5d6;
+  --bg-input: #fffefb;
+  --bg-tab: transparent;
+  --bg-tab-active: transparent;
+
+  /* Text ---------------------------------------------------------------- */
+  --text-primary: #1b1a16;
+  --text-secondary: #6b6559;
+  --text-muted: #9b9587;
+  --text-accent: #a9491f;
+
+  /* Accent -------------------------------------------------------------- */
+  --accent-color: #b0512a;
+  --accent-hover: #95401f;
+  --accent-contrast: #fffdf9;
+  --accent-2: #4d6b57;
+  --accent-soft: #f4e7dd;
+  --accent-border: #dcc3b2;
+  --accent-gradient: linear-gradient(90deg, #b0512a, #b0512a);
+  --accent-glow: none;
+  --selection-bg: #ead9c9;
+  --focus-ring: 0 0 0 2px rgba(176, 81, 42, 0.16);
+
+  /* Lines --------------------------------------------------------------- */
+  --border-color: #e6e1d5;
+  --border-strong: #d4cdbc;
+  --border-active: #b0512a;
+  --scrollbar-thumb: #ddd7c8;
+  --scrollbar-thumb-hover: #c9c2b1;
+
+  /* Shell --------------------------------------------------------------- */
+  --shell-pad: 0px;
+  --shell-bg: #fbf9f3;
+  --shell-border: #e6e1d5;
+  --shell-radius: 0px;
+  --shell-shadow: none;
+  --glass-blur: none;
+
+  /* Shape --------------------------------------------------------------- */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-pill: 3px;
+  --shadow-1: none;
+  --shadow-2: none;
+  --shadow-3: none;
+
+  /* Overlays ------------------------------------------------------------ */
+  --overlay-bg: rgba(27, 26, 22, 0.26);
+  --overlay-blur: blur(2px);
+  --drag-overlay: rgba(251, 249, 243, 0.82);
+  --kbd-bg: #f1ece1;
+  --switch-bg: #e3ddce;
+  --switch-knob: #fffdf9;
+
+  /* Brand --------------------------------------------------------------- */
+  --logo-bg: #1b1a16;
+  --logo-fg: #fbf9f3;
+  --logo-shadow: none;
+
+  /* Controls ------------------------------------------------------------ */
+  --seg-active-bg: transparent;
+  --seg-active-text: #1b1a16;
+  --seg-active-border: transparent;
+  --seg-active-shadow: none;
+  --tab-active-bg: transparent;
+  --tab-active-border: transparent;
+  --tab-active-shadow: none;
+  --pane-bar-bg: #fbf9f3;
+  --tree-active-bg: #fffdf7;
+
+  /* Semantic ------------------------------------------------------------ */
+  --ok-color: #4d7a5f;
+  --ok-soft: #e6ede6;
+  --ok-glow: transparent;
+  --warn-color: #b06a2a;
+  --warn-soft: #f3e6d8;
+  --warn-border: #e3cdb4;
+  --warn-glow: transparent;
+  --danger-color: #a33a2a;
+  --mark-bg: #f2e3c3;
+  --mark-fg: #4a3a1c;
+
+  /* Preview ------------------------------------------------------------- */
+  --preview-text: #33302a;
+  --preview-heading: #16150f;
+  --preview-strong: #16150f;
+  --preview-em: #4d6b57;
+  --preview-inline-code: #4d6b57;
+  --preview-bg-code: #f7f3e9;
+  --preview-bg-table-header: transparent;
+  --quote-bg: transparent;
+  --code-shadow: none;
+  --check-bg: #4d6b57;
+  --check-border: #4d6b57;
+  --check-mark: #fffdf9;
+
+  /* Mermaid (SVG palette, read at render time) -------------------------- */
+  --mermaid-bg: #fbf8f1;
+  --mermaid-surface: #f3eee2;
+  --mermaid-node-bg: #ffffff;
+  --mermaid-node-border: #b9b0a0;
+  --mermaid-node-text: #26231d;
+  --mermaid-line: #6b6357;
+  --mermaid-label-bg: #fbf8f1;
+  --mermaid-label-text: #26231d;
+  --mermaid-cluster-bg: #f7f3e9;
+  --mermaid-cluster-border: #c9c1b2;
+  --mermaid-note-bg: #fff8e6;
+  --mermaid-note-text: #26231d;
+  --mermaid-note-border: #d7c9a6;
+  --mermaid-activation-bg: #efe7d7;
+  --mermaid-activation-border: #b9b0a0;
+
+  /* Diff ---------------------------------------------------------------- */
+  --diff-add-bg: #edf3ec;
+  --diff-del-bg: #f8e9e4;
+  --diff-empty-bg: #faf8f2;
+
+  /* File glyphs --------------------------------------------------------- */
+  --file-md: #b0512a;
+  --file-html: #b06a2a;
+  --file-doc: #4b6f9e;
+  --file-xls: #4d7a5f;
+  --file-pdf: #a33a2a;
+  --file-img: #8a5a7a;
+  --file-folder: #9c9587;
+  --file-default: #9c9587;
+}

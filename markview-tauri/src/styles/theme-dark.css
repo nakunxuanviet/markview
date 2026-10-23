@@ -1,0 +1,182 @@
+/* ==========================================================================
+   Aurora — dark theme tokens
+   Glass shell, ambient violet/cyan light, deep ink panels.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* Type ---------------------------------------------------------------- */
+  --font-ui:
+    "Segoe UI Variable Text", "Inter", "Segoe UI", system-ui, -apple-system,
+    sans-serif;
+  --font-mono:
+    "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --font-editor: var(--font-mono);
+  --font-preview:
+    "Segoe UI Variable Text", "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-display: var(--font-ui);
+  --font-size-ui: 13px;
+  --font-size-editor: 14px;
+  --font-size-preview: 15px;
+  --label-spacing: 0.1em;
+  --label-transform: uppercase;
+
+  /* Surfaces ------------------------------------------------------------ */
+  --bg-app: #05070e;
+  --bg-primary: #0a0e18;
+  --bg-secondary: #0e1422;
+  --bg-elevated: #101728;
+  --bg-sidebar: rgba(255, 255, 255, 0.016);
+  --bg-toolbar: transparent;
+  --bg-tabbar: transparent;
+  --bg-statusbar: rgba(6, 9, 16, 0.42);
+  --bg-preview: #0a0e18;
+  --bg-hover: rgba(255, 255, 255, 0.055);
+  --bg-active: rgba(124, 92, 255, 0.18);
+  --bg-input: rgba(255, 255, 255, 0.04);
+  --bg-tab: transparent;
+  --bg-tab-active: rgba(124, 92, 255, 0.16);
+
+  /* Text ---------------------------------------------------------------- */
+  --text-primary: #e9ecf6;
+  --text-secondary: #98a3bf;
+  --text-muted: #5d6684;
+  --text-accent: #b8a7ff;
+
+  /* Accent -------------------------------------------------------------- */
+  --accent-color: #7c5cff;
+  --accent-hover: #8f74ff;
+  --accent-contrast: #ffffff;
+  --accent-2: #22d3ee;
+  --accent-soft: rgba(124, 92, 255, 0.14);
+  --accent-border: rgba(124, 92, 255, 0.34);
+  --accent-gradient: linear-gradient(135deg, #8b6bff, #6d4dff 55%, #22d3ee);
+  --accent-glow: 0 6px 18px rgba(124, 92, 255, 0.35);
+  --selection-bg: rgba(124, 92, 255, 0.32);
+  --focus-ring: 0 0 0 2px rgba(124, 92, 255, 0.28);
+
+  /* Lines --------------------------------------------------------------- */
+  --border-color: rgba(255, 255, 255, 0.075);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-active: rgba(124, 92, 255, 0.55);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.12);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+
+  /* Shell --------------------------------------------------------------- */
+  --shell-pad: 12px;
+  --shell-bg: rgba(9, 13, 24, 0.72);
+  --shell-border: rgba(255, 255, 255, 0.09);
+  --shell-radius: 16px;
+  --shell-shadow: 0 30px 90px rgba(0, 0, 0, 0.62);
+  --glass-blur: blur(22px) saturate(135%);
+
+  /* Shape --------------------------------------------------------------- */
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+  --shadow-1: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 20px 50px rgba(0, 0, 0, 0.5);
+  --shadow-3: 0 34px 90px rgba(0, 0, 0, 0.64);
+
+  /* Overlays ------------------------------------------------------------ */
+  --overlay-bg: rgba(3, 5, 12, 0.62);
+  --overlay-blur: blur(6px) saturate(120%);
+  --drag-overlay: rgba(8, 12, 24, 0.72);
+  --kbd-bg: rgba(255, 255, 255, 0.05);
+  --switch-bg: rgba(255, 255, 255, 0.09);
+  --switch-knob: #8b94ad;
+
+  /* Brand --------------------------------------------------------------- */
+  --logo-bg: linear-gradient(145deg, #9a7bff, #7c5cff 45%, #22d3ee);
+  --logo-fg: #070a12;
+  --logo-shadow: 0 6px 20px rgba(124, 92, 255, 0.45);
+
+  /* Controls ------------------------------------------------------------ */
+  --seg-active-bg: linear-gradient(
+    135deg,
+    rgba(139, 107, 255, 0.95),
+    rgba(109, 77, 255, 0.9)
+  );
+  --seg-active-text: #ffffff;
+  --seg-active-border: rgba(255, 255, 255, 0.14);
+  --seg-active-shadow: 0 4px 14px rgba(124, 92, 255, 0.4);
+  --tab-active-bg: linear-gradient(
+    180deg,
+    rgba(124, 92, 255, 0.2),
+    rgba(124, 92, 255, 0.08)
+  );
+  --tab-active-border: rgba(124, 92, 255, 0.36);
+  --tab-active-shadow:
+    0 6px 18px rgba(124, 92, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --pane-bar-bg: rgba(255, 255, 255, 0.014);
+  --tree-active-bg: linear-gradient(
+    90deg,
+    rgba(124, 92, 255, 0.18),
+    rgba(124, 92, 255, 0.04)
+  );
+
+  /* Semantic ------------------------------------------------------------ */
+  --ok-color: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.16);
+  --ok-glow: rgba(52, 211, 153, 0.5);
+  --warn-color: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.16);
+  --warn-border: rgba(251, 191, 36, 0.32);
+  --warn-glow: rgba(251, 191, 36, 0.45);
+  --danger-color: #fb7185;
+  --mark-bg: rgba(251, 191, 36, 0.22);
+  --mark-fg: #fde68a;
+
+  /* Preview ------------------------------------------------------------- */
+  --preview-text: #c8d0e4;
+  --preview-heading: #f1f4fc;
+  --preview-strong: #ffffff;
+  --preview-em: #d9ccff;
+  --preview-inline-code: #7ee7d8;
+  --preview-bg-code: #080c15;
+  --preview-bg-table-header: rgba(255, 255, 255, 0.025);
+  --quote-bg: linear-gradient(
+    135deg,
+    rgba(124, 92, 255, 0.12),
+    rgba(34, 211, 238, 0.05)
+  );
+  --code-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  --check-bg: linear-gradient(135deg, #8b6bff, #22d3ee);
+  --check-border: rgba(124, 92, 255, 0.5);
+  --check-mark: #06121a;
+
+  /* Mermaid (SVG palette, read at render time) -------------------------- */
+  --mermaid-bg: #0e1422;
+  --mermaid-surface: #131a2b;
+  --mermaid-node-bg: #161e31;
+  --mermaid-node-border: #5a6a92;
+  --mermaid-node-text: #edf1fb;
+  --mermaid-line: #a9b7db;
+  --mermaid-label-bg: #0e1422;
+  --mermaid-label-text: #e8edf8;
+  --mermaid-cluster-bg: #101728;
+  --mermaid-cluster-border: #35415f;
+  --mermaid-note-bg: #1b2440;
+  --mermaid-note-text: #eef2fb;
+  --mermaid-note-border: #4d5b7d;
+  --mermaid-activation-bg: #22304f;
+  --mermaid-activation-border: #5d6d95;
+
+  /* Diff ---------------------------------------------------------------- */
+  --diff-add-bg: rgba(52, 211, 153, 0.12);
+  --diff-del-bg: rgba(251, 113, 133, 0.12);
+  --diff-empty-bg: rgba(255, 255, 255, 0.02);
+
+  /* File glyphs --------------------------------------------------------- */
+  --file-md: #9db4ff;
+  --file-html: #f0a36b;
+  --file-doc: #7db8ff;
+  --file-xls: #5ed6a0;
+  --file-pdf: #fb7185;
+  --file-img: #f0abfc;
+  --file-folder: #8b93ad;
+  --file-default: #8b93ad;
+}
