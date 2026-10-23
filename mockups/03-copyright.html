@@ -1,0 +1,1118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarkView — Copyright placement mockup</title>
+    <style>
+      :root {
+        --bg: #05070e;
+        --panel: #0a0e18;
+        --panel-2: #0e1422;
+        --elevated: #101728;
+        --stroke: rgba(255, 255, 255, 0.075);
+        --stroke-2: rgba(255, 255, 255, 0.14);
+        --text: #e9ecf6;
+        --dim: #98a3bf;
+        --muted: #5d6684;
+        --accent: #7c5cff;
+        --accent-soft: rgba(124, 92, 255, 0.14);
+        --accent-border: rgba(124, 92, 255, 0.34);
+        --ok: #34d399;
+        --radius: 14px;
+        --ui:
+          "Segoe UI Variable Text", "Inter", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 40px 32px 64px;
+        background:
+          radial-gradient(
+            900px 520px at 12% -10%,
+            rgba(76, 43, 216, 0.28),
+            transparent 65%
+          ),
+          radial-gradient(
+            760px 480px at 92% 0%,
+            rgba(14, 116, 144, 0.2),
+            transparent 62%
+          ),
+          var(--bg);
+        color: var(--text);
+        font-family: var(--ui);
+        -webkit-font-smoothing: antialiased;
+      }
+      ::selection {
+        background: rgba(124, 92, 255, 0.35);
+      }
+      .page {
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+
+      /* ---- intro ---------------------------------------------------------- */
+      .eyebrow {
+        color: var(--muted);
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: clamp(28px, 3.2vw, 42px);
+        line-height: 1.12;
+        font-weight: 650;
+        letter-spacing: -0.025em;
+      }
+      .lede {
+        max-width: 760px;
+        margin: 0;
+        color: var(--dim);
+        font-size: 14.5px;
+        line-height: 1.65;
+      }
+      .lede b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 28px;
+        padding: 0 11px;
+        border: 1px solid var(--stroke);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.035);
+        color: var(--dim);
+        font-size: 11.5px;
+      }
+      .chip i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .chip.alt i {
+        background: var(--ok);
+      }
+      .chip.third i {
+        background: #fbbf24;
+      }
+
+      .options {
+        display: grid;
+        gap: 26px;
+        margin-top: 30px;
+      }
+      .option {
+        border: 1px solid var(--stroke);
+        border-radius: 18px;
+        background:
+          linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.025),
+            rgba(255, 255, 255, 0) 220px
+          ),
+          var(--panel);
+        box-shadow:
+          0 24px 70px rgba(0, 0, 0, 0.45),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        overflow: hidden;
+      }
+      .option-head {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 18px 22px;
+        border-bottom: 1px solid var(--stroke);
+        background: rgba(255, 255, 255, 0.018);
+      }
+      .option-title {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        min-width: 0;
+      }
+      .option-title .letter {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        background: var(--accent-soft);
+        border: 1px solid var(--accent-border);
+        color: #b8a7ff;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        font-weight: 700;
+        flex: none;
+      }
+      .option-title h2 {
+        margin: 0;
+        font-size: 15.5px;
+        font-weight: 620;
+        letter-spacing: -0.01em;
+      }
+      .option-title p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .badge {
+        margin-left: auto;
+        flex: none;
+        height: 24px;
+        padding: 0 10px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--accent-border);
+        background: var(--accent-soft);
+        color: #c9bcff;
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .badge.neutral {
+        border-color: var(--stroke-2);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--dim);
+      }
+      .option-body {
+        padding: 22px;
+      }
+      .caption {
+        display: flex;
+        gap: 10px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .caption b {
+        color: var(--dim);
+        font-weight: 600;
+      }
+      .caption code {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: #b8a7ff;
+        background: var(--accent-soft);
+        border: 1px solid var(--accent-border);
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+
+      /* ---- shared window chrome ------------------------------------------- */
+      .window {
+        border: 1px solid var(--stroke);
+        border-radius: 14px;
+        background: var(--panel-2);
+        overflow: hidden;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+      }
+      .topbar {
+        height: 52px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--stroke);
+      }
+      .logo {
+        width: 28px;
+        height: 28px;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(140deg, #8b6bff, #22d3ee 120%);
+        box-shadow:
+          0 6px 18px rgba(124, 92, 255, 0.4),
+          inset 0 1px 0 rgba(255, 255, 255, 0.4);
+        color: #0b0f1a;
+        font-size: 13px;
+        font-weight: 800;
+        flex: none;
+      }
+      .brand {
+        font-size: 13.5px;
+        font-weight: 650;
+        letter-spacing: 0.01em;
+      }
+      .crumb {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .crumb strong {
+        color: var(--text);
+        font-weight: 550;
+      }
+      .grow {
+        flex: 1;
+      }
+      .search {
+        width: 270px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        padding: 0 10px;
+        border: 1px solid var(--stroke);
+        border-radius: 9px;
+        color: var(--muted);
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.025);
+      }
+      .seg {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 3px;
+        border: 1px solid var(--stroke);
+        border-radius: 9px;
+        font-size: 11.5px;
+        color: var(--dim);
+      }
+      .seg span {
+        padding: 4px 9px;
+        border-radius: 6px;
+      }
+      .seg .on {
+        background: var(--accent-soft);
+        color: #d9d1ff;
+      }
+
+      .tabs {
+        height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--stroke);
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .tab {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 10px;
+        border-radius: 7px;
+      }
+      .tab.active {
+        background: rgba(124, 92, 255, 0.16);
+        color: var(--text);
+      }
+      .tab .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--ok);
+      }
+
+      .workspace {
+        display: flex;
+        min-height: 260px;
+      }
+      .sidebar {
+        width: 210px;
+        flex: none;
+        border-right: 1px solid var(--stroke);
+        padding: 14px 12px;
+        background: rgba(255, 255, 255, 0.012);
+      }
+      .side-label {
+        color: var(--muted);
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin: 0 0 10px 4px;
+      }
+      .folder {
+        color: var(--dim);
+        font-size: 12px;
+        margin: 0 0 10px 4px;
+      }
+      .file {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 8px;
+        border-radius: 7px;
+        color: var(--dim);
+        font-size: 12px;
+      }
+      .file.active {
+        background: var(--accent-soft);
+        color: var(--text);
+      }
+      .file .md {
+        display: grid;
+        place-items: center;
+        width: 17px;
+        height: 17px;
+        border-radius: 4px;
+        border: 1px solid var(--accent-border);
+        color: #b8a7ff;
+        font-family: var(--mono);
+        font-size: 7.5px;
+        font-weight: 700;
+      }
+      .pane {
+        flex: 1;
+        min-width: 0;
+        padding: 22px 26px;
+      }
+      .pane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 9.5px;
+        font-weight: 600;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        margin-bottom: 14px;
+      }
+      .pane-head .live {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--dim);
+        letter-spacing: 0.1em;
+      }
+      .pane-head .live i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--ok);
+        box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+      }
+      .pane h3 {
+        margin: 0 0 8px;
+        font-size: 26px;
+        letter-spacing: -0.02em;
+      }
+      .pane p {
+        margin: 0 0 12px;
+        color: var(--dim);
+        font-size: 13.5px;
+        line-height: 1.6;
+      }
+      .pane .mark {
+        color: var(--text);
+        background: rgba(251, 191, 36, 0.18);
+        border-radius: 3px;
+        padding: 0 2px;
+      }
+
+      /* ---- status bar ----------------------------------------------------- */
+      .statusbar {
+        position: relative;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 14px;
+        border-top: 1px solid var(--stroke);
+        background: rgba(6, 9, 16, 0.55);
+        color: var(--muted);
+        font-size: 10.5px;
+        letter-spacing: 0.02em;
+      }
+      .statusbar .right {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .statusbar .divider {
+        width: 1px;
+        height: 12px;
+        background: var(--stroke-2);
+      }
+      .copyright {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 8px;
+        border: 1px solid var(--stroke-2);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+      }
+      .hotspot {
+        outline: 1px dashed rgba(124, 92, 255, 0.85);
+        outline-offset: 4px;
+        border-radius: 4px;
+      }
+      .callout {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 12px;
+        color: #c9bcff;
+        font-size: 11.5px;
+      }
+      .callout::before {
+        content: "";
+        width: 18px;
+        height: 1px;
+        background: rgba(124, 92, 255, 0.8);
+      }
+
+      /* ---- settings dialog ------------------------------------------------ */
+      .settings-stage {
+        padding: 26px;
+        border-radius: 12px;
+        background:
+          radial-gradient(
+            600px 260px at 50% 0%,
+            rgba(124, 92, 255, 0.08),
+            transparent 70%
+          ),
+          #070b13;
+        border: 1px solid var(--stroke);
+      }
+      .dialog {
+        width: min(620px, 100%);
+        margin: 0 auto;
+        border: 1px solid var(--stroke-2);
+        border-radius: 14px;
+        background: var(--elevated);
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+        overflow: hidden;
+      }
+      .dialog-head {
+        padding: 18px 22px 14px;
+        border-bottom: 1px solid var(--stroke);
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+      .dialog-head .label {
+        color: var(--muted);
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+      }
+      .dialog-head h3 {
+        margin: 0;
+        font-size: 24px;
+        letter-spacing: -0.02em;
+      }
+      .dialog-close {
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1;
+      }
+      .dialog-body {
+        padding: 18px 22px 8px;
+        display: grid;
+        gap: 14px;
+      }
+      .section {
+        border: 1px solid var(--stroke);
+        border-radius: 10px;
+        background: var(--panel-2);
+        overflow: hidden;
+      }
+      .section-title {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--stroke);
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--muted);
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        min-height: 42px;
+        padding: 6px 14px;
+        border-bottom: 1px solid var(--stroke);
+        font-size: 12px;
+      }
+      .row:last-child {
+        border-bottom: 0;
+      }
+      .row .key {
+        color: var(--dim);
+      }
+      .row .value {
+        margin-left: auto;
+        color: var(--text);
+        text-align: right;
+      }
+      .row .value.mono {
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      .row .value.full {
+        font-size: 11.5px;
+        color: var(--dim);
+      }
+      .dialog-foot {
+        padding: 12px 22px 16px;
+        border-top: 1px solid var(--stroke);
+        display: flex;
+        justify-content: flex-end;
+      }
+      .btn {
+        height: 30px;
+        padding: 0 14px;
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--stroke-2);
+        border-radius: 7px;
+        color: var(--dim);
+        font-size: 11.5px;
+      }
+
+      .welcome-logo {
+        width: 46px;
+        height: 46px;
+        margin: 0 auto 14px;
+        display: grid;
+        place-items: center;
+        border-radius: 13px;
+        background: linear-gradient(145deg, #9a7bff, #7c5cff 45%, #22d3ee);
+        box-shadow:
+          0 10px 26px rgba(124, 92, 255, 0.35),
+          inset 0 1px 0 rgba(255, 255, 255, 0.35);
+        color: #0b0f1a;
+        font-size: 21px;
+        font-weight: 800;
+      }
+
+      .welcome-content h2 {
+        margin: 0 0 6px;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .welcome-content p {
+        margin: 0 0 18px;
+        color: var(--dim);
+        font-size: 12px;
+        line-height: 1.65;
+      }
+
+      /* ---- welcome -------------------------------------------------------- */
+      .welcome {
+        min-height: 340px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 42px 24px 26px;
+      }
+      .welcome .logo-lg {
+        width: 58px;
+        height: 58px;
+        border-radius: 17px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(145deg, #9a7bff, #7c5cff 45%, #22d3ee);
+        box-shadow:
+          0 12px 34px rgba(124, 92, 255, 0.38),
+          inset 0 1px 0 rgba(255, 255, 255, 0.35);
+        color: #0b0f1a;
+        font-size: 24px;
+        font-weight: 800;
+        margin-bottom: 16px;
+      }
+      .welcome h2 {
+        margin: 0 0 8px;
+        font-size: 25px;
+        letter-spacing: -0.02em;
+      }
+      .welcome p {
+        margin: 0;
+        color: var(--dim);
+        font-size: 13px;
+      }
+      .welcome .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 20px;
+        color: var(--dim);
+        font-size: 11.5px;
+      }
+      .welcome .actions span {
+        padding: 6px 10px;
+        border: 1px solid var(--stroke);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.025);
+      }
+      .welcome-foot {
+        width: 100%;
+        margin-top: 34px;
+        padding-top: 16px;
+        border-top: 1px solid var(--stroke);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+      .welcome-foot .dot {
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: var(--stroke-2);
+      }
+
+      /* ---- recommendation ------------------------------------------------- */
+      .recommendation {
+        margin-top: 30px;
+        border: 1px solid var(--accent-border);
+        border-radius: 16px;
+        background:
+          linear-gradient(
+            135deg,
+            rgba(124, 92, 255, 0.13),
+            rgba(34, 211, 238, 0.06)
+          ),
+          var(--panel);
+        padding: 22px 24px;
+      }
+      .recommendation h2 {
+        margin: 0 0 8px;
+        font-size: 17px;
+        letter-spacing: -0.01em;
+      }
+      .recommendation p {
+        margin: 0;
+        color: var(--dim);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+      .recommendation p + p {
+        margin-top: 8px;
+      }
+      .recommendation code {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: #c9bcff;
+      }
+      .note {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--stroke);
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.6;
+      }
+      .footer-note {
+        margin-top: 26px;
+        color: var(--muted);
+        font-size: 11px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="eyebrow">MarkView · Copyright placement</div>
+      <h1>Where should the copyright live?</h1>
+      <p class="lede">
+        Three placements, ranked by <b>visibility vs. intrusiveness</b>. The
+        short mark and the full notice do not have to live in the same place:
+        <b>A</b> keeps the author visible while writing, <b>B</b> gives the full
+        notice a proper home.
+      </p>
+      <div class="chips">
+        <span class="chip"><i></i>A · Status bar</span>
+        <span class="chip alt"><i></i>B · Settings → About</span>
+        <span class="chip third"><i></i>C · Welcome screen</span>
+      </div>
+
+      <div class="options">
+        <!-- ============ A · Status bar ============ -->
+        <section class="option">
+          <header class="option-head">
+            <div class="option-title">
+              <span class="letter">A</span>
+              <div>
+                <h2>Status bar · short mark</h2>
+                <p>Always visible, never in the way of the document</p>
+              </div>
+            </div>
+            <span class="badge">Recommended</span>
+          </header>
+          <div class="option-body">
+            <div class="window">
+              <div class="topbar">
+                <div class="logo">M</div>
+                <div class="brand">MarkView</div>
+                <div class="crumb">
+                  <span>markview-vault</span>
+                  <span>/</span>
+                  <strong>guide.md</strong>
+                </div>
+                <div class="grow"></div>
+                <div class="search">
+                  Search files
+                  <span
+                    style="
+                      margin-left: auto;
+                      color: var(--muted);
+                      font-size: 9.5px;
+                    "
+                    >Ctrl P</span
+                  >
+                </div>
+                <div class="seg">
+                  <span>Write</span><span class="on">Split</span
+                  ><span>Read</span>
+                </div>
+              </div>
+              <div class="tabs">
+                <div class="tab">
+                  <span
+                    class="md"
+                    style="
+                      display: grid;
+                      place-items: center;
+                      width: 15px;
+                      height: 15px;
+                      border: 1px solid var(--stroke-2);
+                      border-radius: 4px;
+                      font-family: var(--mono);
+                      font-size: 7px;
+                    "
+                    >MD</span
+                  >architecture.md
+                </div>
+                <div class="tab active">
+                  <span
+                    class="md"
+                    style="
+                      display: grid;
+                      place-items: center;
+                      width: 15px;
+                      height: 15px;
+                      border: 1px solid var(--accent-border);
+                      border-radius: 4px;
+                      color: #b8a7ff;
+                      font-family: var(--mono);
+                      font-size: 7px;
+                    "
+                    >MD</span
+                  >guide.md
+                </div>
+                <div class="tab">
+                  <span
+                    class="md"
+                    style="
+                      display: grid;
+                      place-items: center;
+                      width: 15px;
+                      height: 15px;
+                      border: 1px solid var(--stroke-2);
+                      border-radius: 4px;
+                      font-family: var(--mono);
+                      font-size: 7px;
+                    "
+                    >MD</span
+                  >README.md
+                </div>
+              </div>
+              <div class="workspace">
+                <aside class="sidebar">
+                  <div class="side-label">Explorer</div>
+                  <div class="folder">Temp/markview-vault</div>
+                  <div class="file">
+                    <span class="md">MD</span>architecture.md
+                  </div>
+                  <div class="file active">
+                    <span class="md">MD</span>guide.md
+                  </div>
+                  <div class="file"><span class="md">MD</span>README.md</div>
+                </aside>
+                <div class="pane">
+                  <div class="pane-head">
+                    <span>Markdown</span>
+                    <span class="live"><i></i>Preview · Live</span>
+                  </div>
+                  <h3>Markdown guide</h3>
+                  <p>A short tour of the syntax MarkView understands.</p>
+                  <p>
+                    Use <span class="mark">**bold**</span>, <em>italic</em> and
+                    `inline code`.
+                  </p>
+                </div>
+                <div class="pane" style="border-left: 1px solid var(--stroke)">
+                  <div class="pane-head">
+                    <span>Preview</span><span>Markdown</span>
+                  </div>
+                  <h3>Markdown guide</h3>
+                  <p>A short tour of the syntax MarkView understands.</p>
+                  <p>
+                    Use <strong>bold</strong>, <em>italic</em> and
+                    <code
+                      style="
+                        font-family: var(--mono);
+                        font-size: 11px;
+                        color: #b8a7ff;
+                        background: var(--accent-soft);
+                        padding: 1px 5px;
+                        border-radius: 4px;
+                      "
+                      >inline code</code
+                    >.
+                  </p>
+                </div>
+              </div>
+              <div class="statusbar">
+                <span>Ln 12, Col 4</span>
+                <span>55 words</span>
+                <span>406 B</span>
+                <div class="right">
+                  <span class="copyright hotspot">© 2026 VietTX5</span>
+                  <span class="divider"></span>
+                  <span>UTF-8</span>
+                  <span>Markdown</span>
+                </div>
+              </div>
+            </div>
+            <div class="callout">
+              11px · semibold · outlined pill · before the encoding
+            </div>
+            <div class="caption">
+              <span
+                ><b>Why here:</b> it is present in every editing session but
+                never covers the document. Keep the short form only; the full
+                notice goes in <b>Settings → About</b>. The status bar is
+                already the quiet metadata strip, so the eye does not treat it
+                as content.</span
+              >
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ B · Settings → About ============ -->
+        <section class="option">
+          <header class="option-head">
+            <div class="option-title">
+              <span class="letter">B</span>
+              <div>
+                <h2>Settings → About · full notice</h2>
+                <p>The proper legal home for the full notice</p>
+              </div>
+            </div>
+            <span class="badge neutral">Legal home</span>
+          </header>
+          <div class="option-body">
+            <div class="settings-stage">
+              <div class="dialog">
+                <div class="dialog-head">
+                  <div>
+                    <div class="label">Preferences</div>
+                    <h3>Settings</h3>
+                  </div>
+                  <div class="dialog-close">✕</div>
+                </div>
+                <div class="dialog-body">
+                  <div class="section">
+                    <div class="section-title">Appearance</div>
+                    <div class="row">
+                      <span class="key">Theme</span
+                      ><span class="value">Dark</span>
+                    </div>
+                    <div class="row">
+                      <span class="key">Zoom with Ctrl + mouse wheel</span
+                      ><span
+                        class="value"
+                        style="display: flex; align-items: center; gap: 8px"
+                        ><span
+                          style="
+                            width: 30px;
+                            height: 17px;
+                            border-radius: 999px;
+                            background: var(--stroke-2);
+                            position: relative;
+                          "
+                          ><span
+                            style="
+                              position: absolute;
+                              left: 2px;
+                              top: 2px;
+                              width: 13px;
+                              height: 13px;
+                              border-radius: 50%;
+                              background: #fff;
+                            "
+                          ></span></span
+                        ><span style="color: var(--muted); font-size: 10.5px"
+                          >Off</span
+                        ></span
+                      >
+                    </div>
+                  </div>
+                  <div class="section">
+                    <div class="section-title">About</div>
+                    <div class="row">
+                      <span class="key">Version</span
+                      ><span class="value mono">2.0.0</span>
+                    </div>
+                    <div class="row">
+                      <span class="key">License</span
+                      ><span class="value">MIT License</span>
+                    </div>
+                    <div class="row">
+                      <span class="key">Copyright</span
+                      ><span class="value full">© 2026 VietTX5</span>
+                    </div>
+                    <div class="row">
+                      <span class="key">Source</span
+                      ><span class="value" style="color: #b8a7ff"
+                        >github.com/VietTX5/markview</span
+                      >
+                    </div>
+                  </div>
+                </div>
+                <div class="dialog-foot"><span class="btn">Close</span></div>
+              </div>
+            </div>
+            <div class="callout">
+              Full notice · 11.5px · dim · no extra chrome
+            </div>
+            <div class="caption">
+              <span
+                ><b>Why here:</b> users who look for copyright already open
+                Settings. A dedicated <b>About</b> section also gives the
+                version, license and repository a natural home, and keeps the
+                full notice out of the writing surface.</span
+              >
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ C · Welcome ============ -->
+        <section class="option">
+          <header class="option-head">
+            <div class="option-title">
+              <span class="letter">C</span>
+              <div>
+                <h2>Sidebar welcome · small footer</h2>
+                <p>Only when no folder is open</p>
+              </div>
+            </div>
+            <span class="badge neutral">Optional</span>
+          </header>
+          <div class="option-body">
+            <div class="window" style="width: 300px; margin: 0 auto">
+              <div
+                class="sidebar"
+                style="
+                  width: 300px;
+                  min-height: 340px;
+                  border-right: 0;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 24px 18px;
+                "
+              >
+                <div class="welcome-content" style="max-width: 236px">
+                  <div class="welcome-logo" style="margin: 0 auto 14px">M</div>
+                  <h2>MarkView</h2>
+                  <p>
+                    Open a folder to browse, edit and preview your Markdown
+                    files.
+                  </p>
+                  <span
+                    class="btn"
+                    style="
+                      background: var(--accent);
+                      color: #fff;
+                      border-color: transparent;
+                    "
+                    >Open folder</span
+                  >
+                  <div class="welcome-foot">
+                    <span>© 2026 VietTX5</span>
+                    <span class="dot"></span>
+                    <span>v2.0.0</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="callout">
+              Small footer · one line · never overlaps content
+            </div>
+            <div class="caption">
+              <span
+                ><b>Why here:</b> a friendly first impression and a useful
+                version hint. It disappears as soon as a folder is open, so it
+                cannot become visual noise.</span
+              >
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="recommendation">
+        <h2>Chosen: A + B + C</h2>
+        <p>
+          Use <code>© 2026 VietTX5</code> in the status bar for a persistent,
+          low-noise mark, <code>© 2026 VietTX5 · MIT License</code> in
+          <b>Settings → About</b>, and the small version line in the sidebar
+          welcome panel. The sidebar variant is the real app location, so the
+          mark disappears as soon as a folder is open.
+        </p>
+        <p>
+          Keep the year in one constant so it is easy to bump each January.
+          Avoid placing copyright in the native title bar (OS-controlled) or as
+          a watermark over the preview, both compete with the document.
+        </p>
+        <div class="note">
+          <b>License note:</b> this repo uses MIT, so the correct pair is “©
+          2026 VietTX5 · MIT License”, not “All rights reserved” (that phrase
+          belongs to a proprietary license). The <code>LICENSE</code> file now
+          names VietTX5 as the holder. If you later want “© 2026 VietTX5. All
+          rights reserved.”, switch the project to a proprietary license and
+          update <code>LICENSE</code> accordingly.
+        </div>
+      </div>
+
+      <div class="footer-note">
+        MarkView · copyright placement mockup · dark theme
+      </div>
+    </div>
+  </body>
+</html>

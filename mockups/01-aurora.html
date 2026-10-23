@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MarkView — Style A · Aurora</title>
+<style>
+  :root {
+    --bg: #06080f;
+    --panel: rgba(18, 23, 38, 0.72);
+    --panel-2: rgba(25, 31, 49, 0.6);
+    --stroke: rgba(255, 255, 255, 0.075);
+    --stroke-2: rgba(255, 255, 255, 0.14);
+    --text: #e8ebf5;
+    --dim: #98a2bd;
+    --faint: #5d6784;
+    --accent: #7c5cff;
+    --accent-2: #22d3ee;
+    --accent-3: #f472b6;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --radius: 14px;
+    --ui: "Segoe UI Variable Text", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--ui);
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  ::selection { background: rgba(124, 92, 255, 0.35); }
+
+  /* ambient light */
+  .ambient {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .ambient i {
+    position: absolute;
+    display: block;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.55;
+  }
+  .ambient i:nth-child(1) { width: 46vw; height: 46vw; left: -12vw; top: -18vw; background: #4c2bd8; opacity: .5; }
+  .ambient i:nth-child(2) { width: 38vw; height: 38vw; right: -10vw; top: -12vw; background: #0e7490; opacity: .38; }
+  .ambient i:nth-child(3) { width: 34vw; height: 34vw; right: 6vw; bottom: -20vw; background: #7c3aed; opacity: .26; }
+
+  .shell {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-height: 0;
+    margin: 14px 14px 0;
+    display: flex;
+    flex-direction: column;
+    border-radius: 18px;
+    border: 1px solid var(--stroke);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0) 120px),
+      rgba(9, 13, 24, 0.72);
+    backdrop-filter: blur(26px) saturate(130%);
+    box-shadow: 0 40px 90px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255,255,255,.06);
+    overflow: hidden;
+  }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    height: 52px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--stroke);
+  }
+  .brand { display: flex; align-items: center; gap: 9px; }
+  .logo {
+    width: 28px; height: 28px;
+    border-radius: 9px;
+    display: grid; place-items: center;
+    background: linear-gradient(140deg, #8b6bff, #22d3ee 120%);
+    box-shadow: 0 6px 18px rgba(124, 92, 255, .45), inset 0 1px 0 rgba(255,255,255,.4);
+    color: #0b0f1a;
+    flex: none;
+  }
+  .brand b { font-size: 13.5px; letter-spacing: .01em; font-weight: 650; }
+
+  .crumb { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--faint); }
+  .crumb .sep { opacity: .5; }
+  .crumb strong { color: var(--text); font-weight: 550; }
+  .crumb .chip-ws {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px 4px 7px;
+    border-radius: 8px;
+    background: rgba(255,255,255,.045);
+    border: 1px solid var(--stroke);
+    color: var(--dim);
+  }
+
+  .spacer { flex: 1; }
+
+  .cmdk {
+    width: clamp(220px, 26vw, 360px);
+    height: 32px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 8px 0 10px;
+    border-radius: 10px;
+    border: 1px solid var(--stroke);
+    background: rgba(255,255,255,.035);
+    color: var(--faint);
+    font: inherit; font-size: 12.5px;
+    cursor: default;
+  }
+  .cmdk:hover { border-color: var(--stroke-2); background: rgba(255,255,255,.055); }
+  .cmdk span { flex: 1; text-align: left; }
+  kbd {
+    font-family: var(--ui);
+    font-size: 10.5px;
+    color: var(--dim);
+    background: rgba(255,255,255,.06);
+    border: 1px solid var(--stroke);
+    border-bottom-color: rgba(0,0,0,.5);
+    border-radius: 5px;
+    padding: 2px 5px;
+    line-height: 1;
+  }
+
+  .segmented {
+    display: flex;
+    padding: 3px;
+    gap: 2px;
+    border-radius: 10px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--stroke);
+  }
+  .segmented button {
+    width: 30px; height: 26px;
+    display: grid; place-items: center;
+    border: 0; border-radius: 7px;
+    background: transparent;
+    color: var(--faint);
+    cursor: pointer;
+  }
+  .segmented button:hover { color: var(--text); background: rgba(255,255,255,.05); }
+  .segmented button.on {
+    color: #fff;
+    background: linear-gradient(180deg, rgba(124,92,255,.9), rgba(99,72,224,.85));
+    box-shadow: 0 4px 14px rgba(124,92,255,.35), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+
+  .icon {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border: 0; border-radius: 9px;
+    background: transparent;
+    color: var(--dim);
+    cursor: pointer;
+  }
+  .icon:hover { background: rgba(255,255,255,.06); color: var(--text); }
+  .icon.sm { width: 26px; height: 26px; border-radius: 7px; }
+
+  svg { display: block; }
+  .i { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .i.sm { width: 14px; height: 14px; }
+
+  /* ---------- tabs ---------- */
+  .tabs {
+    height: 42px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--stroke);
+    background: rgba(255,255,255,.012);
+  }
+  .tab {
+    display: flex; align-items: center; gap: 8px;
+    height: 30px;
+    padding: 0 8px 0 11px;
+    border-radius: 9px;
+    color: var(--dim);
+    font-size: 12.5px;
+    border: 1px solid transparent;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .tab:hover { background: rgba(255,255,255,.045); color: var(--text); }
+  .tab.active {
+    color: #fff;
+    background: linear-gradient(180deg, rgba(124,92,255,.22), rgba(124,92,255,.08));
+    border-color: rgba(124,92,255,.35);
+    box-shadow: 0 6px 20px rgba(124,92,255,.14), inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 8px rgba(251,191,36,.7); }
+  .tab .x { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 5px; background: transparent; color: inherit; opacity: .5; cursor: pointer; }
+  .tab .x:hover { opacity: 1; background: rgba(255,255,255,.1); }
+  .tab-add {
+    width: 28px; height: 28px;
+    display: grid; place-items: center;
+    border-radius: 8px; border: 1px dashed var(--stroke-2);
+    background: transparent; color: var(--faint); cursor: pointer;
+  }
+  .tab-add:hover { color: var(--text); border-style: solid; background: rgba(255,255,255,.04); }
+
+  .saved {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11.5px; color: var(--faint);
+    padding: 0 4px;
+  }
+  .saved i {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 0 3px rgba(52,211,153,.12);
+  }
+
+  /* ---------- workspace ---------- */
+  .workspace { flex: 1; min-height: 0; display: flex; }
+
+  /* sidebar */
+  .sidebar {
+    width: 268px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--stroke);
+    background: linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,0));
+  }
+  .side-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 8px 16px; }
+  .side-head .name { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side-head .spacer { flex: 1; }
+
+  .side-search {
+    margin: 0 12px 10px;
+    height: 30px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 8px;
+    border-radius: 9px;
+    background: rgba(255,255,255,.035);
+    border: 1px solid var(--stroke);
+    color: var(--faint);
+    font-size: 12px;
+  }
+  .side-search input {
+    flex: 1; min-width: 0;
+    background: none; border: 0; outline: 0;
+    color: var(--text); font: inherit;
+  }
+  .side-search input::placeholder { color: var(--faint); }
+
+  .tree { flex: 1; min-height: 0; padding: 2px 8px 10px; overflow: auto; }
+  .row {
+    display: flex; align-items: center; gap: 7px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 7px;
+    color: var(--dim);
+    font-size: 12.5px;
+    cursor: default;
+  }
+  .row:hover { background: rgba(255,255,255,.045); color: var(--text); }
+  .row.active {
+    color: #fff;
+    background: linear-gradient(90deg, rgba(124,92,255,.24), rgba(34,211,238,.09));
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta { font-size: 10.5px; color: var(--faint); }
+  .tree .indent { padding-left: 26px; }
+  .tree .indent-2 { padding-left: 44px; }
+  .ftype { width: 14px; text-align: center; color: var(--accent-2); font-size: 9px; font-weight: 700; letter-spacing: .04em; }
+  .ftype.md { color: #9db4ff; }
+  .chev { color: var(--faint); }
+
+  .outline { margin-top: auto; border-top: 1px solid var(--stroke); padding: 12px 14px 16px; }
+  .outline .label { font-size: 10px; letter-spacing: .15em; text-transform: uppercase; color: var(--faint); font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; }
+  .outline .label .spacer { flex: 1; }
+  .o-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--dim);
+    font-size: 12px;
+    cursor: default;
+    position: relative;
+  }
+  .o-item:hover { color: var(--text); background: rgba(255,255,255,.04); }
+  .o-item.active { color: #fff; }
+  .o-item.active::before {
+    content: ""; position: absolute; left: 0; top: 7px; bottom: 7px;
+    width: 2px; border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  }
+  .o-item.h2 { padding-left: 18px; }
+  .o-item .n { font-size: 10px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+  /* ---------- panes ---------- */
+  .pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: rgba(6, 9, 17, .25); }
+  .pane-bar {
+    height: 38px; flex: none;
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--stroke);
+    background: rgba(255,255,255,.014);
+  }
+  .tools { display: flex; align-items: center; gap: 2px; }
+  .tools .btn {
+    height: 26px; min-width: 26px;
+    display: grid; place-items: center;
+    padding: 0 5px;
+    border: 0; border-radius: 7px;
+    background: transparent; color: var(--dim);
+    font-size: 12px; font-weight: 600; font-family: var(--ui);
+    cursor: pointer;
+  }
+  .tools .btn:hover { background: rgba(255,255,255,.06); color: var(--text); }
+  .tools .btn.on { background: rgba(124,92,255,.18); color: #cfc4ff; }
+  .tools .vsep { width: 1px; height: 16px; background: var(--stroke); margin: 0 5px; }
+  .tools .btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+  .chip {
+    height: 22px;
+    flex: none;
+    white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 0 8px;
+    border-radius: 6px;
+    border: 1px solid var(--stroke);
+    background: rgba(255,255,255,.03);
+    color: var(--faint);
+    font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+  }
+  .chip.accent { color: #b9a8ff; border-color: rgba(124,92,255,.3); background: rgba(124,92,255,.1); }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); padding: 0 6px; }
+  .live i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px rgba(52,211,153,.8); }
+
+  /* editor */
+  .codearea { flex: 1; min-height: 0; display: flex; overflow: hidden; font-family: var(--mono); font-size: 12.5px; }
+  .gutter {
+    flex: none;
+    padding: 18px 0 40px;
+    width: 48px;
+    text-align: right;
+    color: #414b66;
+    user-select: none;
+    border-right: 1px solid rgba(255,255,255,.04);
+    background: rgba(255,255,255,.012);
+  }
+  .gutter span { display: block; height: 22px; line-height: 22px; padding-right: 12px; font-size: 11px; }
+  .gutter span.hl { color: #c9b8ff; }
+  .src { flex: 1; margin: 0; padding: 18px 24px 40px 18px; overflow: hidden; color: #c3cbe0; line-height: 22px; white-space: normal; }
+  .ln { height: 22px; white-space: pre; }
+  .ln.hl {
+    background: linear-gradient(90deg, rgba(124,92,255,.14), rgba(34,211,238,.03) 65%, transparent);
+    box-shadow: inset 2px 0 0 var(--accent);
+    margin: 0 -24px 0 -18px;
+    padding: 0 24px 0 18px;
+  }
+  .md-h { color: #c9b8ff; font-weight: 600; }
+  .md-h2 { color: #9fb0ff; font-weight: 600; }
+  .md-em { color: var(--accent-2); }
+  .md-code { color: #7ee7d8; background: rgba(34,211,238,.09); border-radius: 4px; padding: 1px 4px; }
+  .md-quote { color: #7d88a6; font-style: italic; }
+  .md-bullet { color: var(--accent-3); }
+  .md-check { color: var(--ok); }
+  .md-kw { color: #c4a7ff; }
+  .md-str { color: #6ee7b7; }
+  .md-num { color: #fcd34d; }
+  .md-punct { color: #5d6784; }
+  .md-row { color: #8b96b3; }
+  .caret {
+    display: inline-block; width: 1.5px; height: 15px; vertical-align: -3px;
+    background: linear-gradient(180deg, var(--accent-2), var(--accent));
+    box-shadow: 0 0 8px rgba(34,211,238,.8);
+    animation: blink 1.2s steps(2, start) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .splitter { width: 1px; flex: none; background: var(--stroke); position: relative; }
+  .splitter::after {
+    content: ""; position: absolute; left: -3px; right: -3px; top: 0; bottom: 0;
+    cursor: col-resize;
+  }
+
+  /* preview */
+  .preview { background: rgba(8, 11, 21, .35); }
+  .doc { flex: 1; overflow: auto; padding: 34px 44px 60px; }
+  .doc-inner { max-width: 620px; margin: 0 auto; }
+
+  .eyebrow { font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: #8f7dff; margin: 0 0 10px; }
+  .doc h1 {
+    font-size: 31px; line-height: 1.22; letter-spacing: -.02em; margin: 0 0 10px; font-weight: 650;
+    color: #f4f6ff;
+  }
+  .lede { color: var(--dim); font-size: 14px; line-height: 1.65; margin: 0 0 20px; }
+  .doc p { color: #b6bfd6; font-size: 13.5px; line-height: 1.75; margin: 0 0 16px; }
+  .doc h2 { font-size: 15px; letter-spacing: -.005em; margin: 30px 0 12px; color: #eef1fb; display: flex; align-items: center; gap: 9px; }
+  .doc h2::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--stroke-2), transparent); }
+
+  blockquote {
+    margin: 0 0 22px;
+    padding: 16px 18px 16px 20px;
+    border-radius: 12px;
+    border: 1px solid rgba(124,92,255,.22);
+    background: linear-gradient(120deg, rgba(124,92,255,.12), rgba(34,211,238,.05));
+    color: #d6d9ea;
+    font-size: 14px; line-height: 1.65;
+    position: relative;
+  }
+  blockquote::before {
+    content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px; border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  }
+
+  .checks { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
+  .checks li { display: flex; align-items: center; gap: 10px; color: #b6bfd6; font-size: 13.5px; }
+  .checks .box {
+    width: 16px; height: 16px; border-radius: 5px; flex: none;
+    border: 1px solid var(--stroke-2);
+    display: grid; place-items: center;
+    background: rgba(255,255,255,.03);
+    color: #08111a;
+  }
+  .checks li.done .box {
+    background: linear-gradient(140deg, var(--accent-2), #4ade80);
+    border-color: transparent;
+    box-shadow: 0 3px 10px rgba(34,211,238,.35);
+  }
+  .checks li.done span.t { color: #8390ad; text-decoration: line-through; text-decoration-color: rgba(131,144,173,.5); }
+  .checks .box svg { width: 11px; height: 11px; stroke-width: 2.6; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 0 0 6px; }
+  thead th {
+    text-align: left; font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--faint); font-weight: 600; padding: 0 10px 8px;
+  }
+  tbody td { padding: 9px 10px; color: #b6bfd6; border-top: 1px solid var(--stroke); }
+  tbody tr:hover td { background: rgba(255,255,255,.025); }
+  tbody td:first-child { color: #dbe0f0; }
+  .kbd-cell { font-family: var(--mono); font-size: 11px; color: #c9b8ff; }
+  tbody td:last-child { color: var(--faint); font-size: 11.5px; }
+
+  .codeblock {
+    border-radius: 12px;
+    border: 1px solid var(--stroke);
+    background: #0a0e1a;
+    overflow: hidden;
+    margin: 0 0 18px;
+    box-shadow: 0 18px 40px rgba(0,0,0,.28);
+  }
+  .codeblock .bar {
+    height: 30px; display: flex; align-items: center; gap: 7px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--stroke);
+    background: rgba(255,255,255,.02);
+    color: var(--faint); font-size: 11px; font-family: var(--mono);
+  }
+  .codeblock .bar .d { width: 7px; height: 7px; border-radius: 50%; background: #2b3348; }
+  .codeblock .bar .name { margin-left: 4px; }
+  .codeblock pre { margin: 0; padding: 14px 16px; font-family: var(--mono); font-size: 12px; line-height: 1.75; color: #b8c1d9; overflow: auto; }
+  .cb-kw { color: #c4a7ff; }
+  .cb-str { color: #6ee7b7; }
+  .cb-bool { color: #fcd34d; }
+  .cb-p { color: #566080; }
+
+  .math {
+    font-family: "Cambria Math", "STIX Two Math", Georgia, serif;
+    font-style: italic;
+    color: #e7e2ff;
+    background: rgba(124,92,255,.12);
+    border: 1px solid rgba(124,92,255,.22);
+    padding: 1px 7px; border-radius: 6px;
+  }
+
+  figure { margin: 20px 0 4px; }
+  figure .art {
+    height: 132px;
+    border-radius: 12px;
+    border: 1px solid var(--stroke);
+    background:
+      radial-gradient(120% 140% at 10% 10%, rgba(124,92,255,.3), transparent 60%),
+      radial-gradient(120% 140% at 90% 90%, rgba(34,211,238,.22), transparent 60%),
+      #0b0f1c;
+    display: grid; place-items: center;
+    overflow: hidden;
+  }
+  figcaption { margin-top: 8px; font-size: 11px; color: var(--faint); letter-spacing: .02em; }
+  figcaption b { color: var(--dim); font-weight: 600; }
+
+  /* ---------- status ---------- */
+  .statusbar {
+    height: 30px; flex: none;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 16px;
+    border-top: 1px solid var(--stroke);
+    background: rgba(8, 11, 20, .6);
+    color: var(--faint);
+    font-size: 11px;
+  }
+  .statusbar .vsep { width: 1px; height: 12px; background: var(--stroke); }
+  .statusbar .item { display: inline-flex; align-items: center; gap: 6px; }
+  .statusbar .mono { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+  .statusbar .hint { display: inline-flex; align-items: center; gap: 5px; }
+
+  /* page caption */
+  .caption {
+    flex: none;
+    height: 42px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 18px;
+    color: #6b7387;
+    font-size: 11.5px;
+  }
+  .caption b { color: #cfd5e6; font-weight: 600; font-size: 12px; }
+  .caption .tag {
+    padding: 2px 7px; border-radius: 5px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+    letter-spacing: .06em; text-transform: uppercase; font-size: 9.5px;
+  }
+
+  .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+  .scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); background-clip: content-box; }
+  .scroll::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div class="ambient"><i></i><i></i><i></i></div>
+
+<div class="shell">
+  <!-- top bar -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">
+        <svg class="i" width="16" height="16" viewBox="0 0 24 24" stroke="#0b0f1a" stroke-width="2.2"><path d="M4 17V7l8 7 8-7v10"/></svg>
+      </span>
+      <b>MarkView</b>
+    </div>
+
+    <div class="crumb">
+      <span class="chip-ws">
+        <svg class="i sm" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        vault
+      </span>
+      <span class="sep">/</span>
+      <span>notes</span>
+      <span class="sep">/</span>
+      <strong>architecture.md</strong>
+    </div>
+
+    <div class="spacer"></div>
+
+    <button class="cmdk">
+      <svg class="i sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <span>Search files or run a command</span>
+      <kbd>Ctrl</kbd><kbd>K</kbd>
+    </button>
+
+    <div class="segmented">
+      <button title="Editor"><svg class="i sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button>
+      <button class="on" title="Split view"><svg class="i sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="M7 9h2M7 13h2"/></svg></button>
+      <button title="Preview"><svg class="i sm" viewBox="0 0 24 24"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg></button>
+    </div>
+
+    <button class="icon" title="Toggle theme">
+      <svg class="i" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8.2 8.2 0 1 0 10.5 10.5z"/></svg>
+    </button>
+    <button class="icon" title="Settings">
+      <svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <!-- tabs -->
+  <div class="tabs">
+    <div class="tab">
+      <svg class="i sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+      <span>typography.md</span>
+      <button class="x"><svg class="i sm" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="tab active">
+      <svg class="i sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+      <span>architecture.md</span>
+      <span class="dot" title="Unsaved changes"></span>
+      <button class="x"><svg class="i sm" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="tab">
+      <svg class="i sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+      <span>changelog.md</span>
+      <button class="x"><svg class="i sm" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <button class="tab-add" title="New tab"><svg class="i sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+
+    <div class="spacer"></div>
+    <span class="saved"><i></i>Saved just now</span>
+    <button class="icon sm" title="Zen mode">
+      <svg class="i sm" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+    </button>
+  </div>
+
+  <div class="workspace">
+    <!-- sidebar -->
+    <aside class="sidebar">
+      <div class="side-head">
+        <span class="name">Explorer</span>
+        <div class="spacer"></div>
+        <button class="icon sm" title="Search in files"><svg class="i sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+        <button class="icon sm" title="New file"><svg class="i sm" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 12v6M9 15h6"/></svg></button>
+        <button class="icon sm" title="Collapse all"><svg class="i sm" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+      </div>
+
+      <label class="side-search">
+        <svg class="i sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input placeholder="Filter files" readonly>
+        <kbd>/</kbd>
+      </label>
+
+      <nav class="tree scroll">
+        <div class="row">
+          <svg class="i sm chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+          <svg class="i sm" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="name">01 · notes</span>
+        </div>
+        <div class="row indent active">
+          <span class="ftype md">MD</span>
+          <span class="name">architecture.md</span>
+          <span class="dot" style="width:5px;height:5px;border-radius:50%;background:#fbbf24"></span>
+        </div>
+        <div class="row indent">
+          <span class="ftype md">MD</span>
+          <span class="name">typography.md</span>
+        </div>
+        <div class="row indent">
+          <span class="ftype md">MD</span>
+          <span class="name">motion.md</span>
+        </div>
+        <div class="row">
+          <svg class="i sm chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+          <svg class="i sm" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="name">02 · journal</span>
+        </div>
+        <div class="row">
+          <svg class="i sm chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+          <svg class="i sm" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          <span class="name">assets</span>
+        </div>
+        <div class="row">
+          <span class="ftype md">MD</span>
+          <span class="name">README.md</span>
+          <span class="meta">2.1 KB</span>
+        </div>
+      </nav>
+
+      <div class="outline">
+        <div class="label">
+          Outline
+          <span class="spacer"></span>
+          <svg class="i sm chev" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg>
+        </div>
+        <div class="o-item active"><span class="n">H1</span> Designing a calm editor</div>
+        <div class="o-item h2"><span class="n">H2</span> Principles</div>
+        <div class="o-item h2"><span class="n">H2</span> Shortcuts</div>
+        <div class="o-item h2"><span class="n">H2</span> Render pipeline</div>
+      </div>
+    </aside>
+
+    <!-- editor -->
+    <main class="pane">
+      <div class="pane-bar">
+        <div class="tools">
+          <button class="btn" title="New file"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 12v6M9 15h6"/></svg></button>
+          <button class="btn" title="Open folder"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <button class="btn" title="Save"><svg viewBox="0 0 24 24"><path d="M5 5h11l3 3v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M8 5v5h7V5M8 20v-6h8v6"/></svg></button>
+          <span class="vsep"></span>
+          <button class="btn" title="Bold" style="font-weight:800">B</button>
+          <button class="btn" title="Italic" style="font-style:italic">I</button>
+          <button class="btn" title="Strikethrough" style="text-decoration:line-through">S</button>
+          <button class="btn" title="Inline code"><svg viewBox="0 0 24 24"><path d="m9 8-5 4 5 4M15 8l5 4-5 4"/></svg></button>
+          <button class="btn" title="Link"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg></button>
+          <button class="btn" title="Image"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 18 5-5 4 4 3-3 4 4"/></svg></button>
+          <button class="btn on" title="Heading">H</button>
+          <button class="btn" title="Bullet list"><svg viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+          <button class="btn" title="Numbered list">1.</button>
+          <button class="btn" title="Quote"><svg viewBox="0 0 24 24"><path d="M7 7h4v6a4 4 0 0 1-4 4M15 7h4v6a4 4 0 0 1-4 4"/></svg></button>
+          <button class="btn" title="Table"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10M15 10v10"/></svg></button>
+          <button class="btn" title="Horizontal rule"><svg viewBox="0 0 24 24"><path d="M4 12h16"/></svg></button>
+        </div>
+        <div class="spacer"></div>
+        <span class="chip">Markdown</span>
+        <span class="chip">UTF-8</span>
+      </div>
+
+      <div class="codearea">
+        <div class="gutter">
+          <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
+          <span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span>
+          <span>21</span><span>22</span><span>23</span><span>24</span><span>25</span><span>26</span><span>27</span><span>28</span><span class="hl">29</span>
+        </div>
+        <pre class="src scroll"><div class="ln"><span class="md-h"># Designing a calm editor</span></div>
+<div class="ln"> </div>
+<div class="ln">A note on typography, motion, and the discipline of leaving things out.</div>
+<div class="ln"> </div>
+<div class="ln"><span class="md-quote">&gt; Good tools disappear. The page should feel</span></div>
+<div class="ln"><span class="md-quote">&gt; like paper, not software.</span></div>
+<div class="ln"> </div>
+<div class="ln"><span class="md-h2">## Principles</span></div>
+<div class="ln"> </div>
+<div class="ln"><span class="md-bullet">-</span> <span class="md-check">[x]</span> <span class="md-em">Type first</span>, chrome second</div>
+<div class="ln"><span class="md-bullet">-</span> <span class="md-check">[x]</span> <span class="md-em">One accent</span>, used sparingly</div>
+<div class="ln"><span class="md-bullet">-</span> <span class="md-punct">[ ]</span> Motion under <span class="md-num">120</span> ms</div>
+<div class="ln"> </div>
+<div class="ln"><span class="md-h2">## Shortcuts</span></div>
+<div class="ln"> </div>
+<div class="ln"><span class="md-row">| Action          | Keys    | Scope  |</span></div>
+<div class="ln"><span class="md-row">| --------------- | ------- | ------ |</span></div>
+<div class="ln"><span class="md-row">| Command palette | </span><span class="md-code">Ctrl K</span><span class="md-row">  | global |</span></div>
+<div class="ln"><span class="md-row">| Toggle preview  | </span><span class="md-code">Ctrl ⇧ V</span><span class="md-row">| editor |</span></div>
+<div class="ln"> </div>
+<div class="ln"><span class="md-h2">## Render pipeline</span></div>
+<div class="ln"> </div>
+<div class="ln"><span class="md-punct">```</span><span class="md-em">ts</span></div>
+<div class="ln"><span class="md-kw">const</span> html = <span class="md-kw">await</span> <span class="md-em">render</span>(markdown, {</div>
+<div class="ln">  math: <span class="md-num">true</span>,</div>
+<div class="ln">  diagrams: <span class="md-num">true</span>,</div>
+<div class="ln">});</div>
+<div class="ln"><span class="md-punct">```</span></div>
+<div class="ln hl">Inline math like <span class="md-code">$E = mc^2$</span> stays readable.<span class="caret"></span></div>
+</pre>
+      </div>
+    </main>
+
+    <div class="splitter"></div>
+
+    <!-- preview -->
+    <section class="pane preview">
+      <div class="pane-bar">
+        <span class="pane-title" style="font-size:12px;color:var(--dim);padding:0 6px">Preview</span>
+        <span class="live"><i></i>Live</span>
+        <div class="spacer"></div>
+        <button class="icon sm" title="Copy as HTML"><svg class="i sm" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button>
+        <button class="icon sm" title="More"><svg class="i sm" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg></button>
+      </div>
+
+      <div class="doc scroll">
+        <div class="doc-inner">
+          <p class="eyebrow">Design note · 22 Oct 2026</p>
+          <h1>Designing a calm editor</h1>
+          <p class="lede">A note on typography, motion, and the discipline of leaving things out.</p>
+
+          <blockquote>Good tools disappear. The page should feel like paper, not software.</blockquote>
+
+          <h2>Principles</h2>
+          <ul class="checks">
+            <li class="done"><span class="box"><svg class="i" viewBox="0 0 24 24"><path d="m4 12.5 5 5L20 6.5"/></svg></span><span class="t">Type first, chrome second</span></li>
+            <li class="done"><span class="box"><svg class="i" viewBox="0 0 24 24"><path d="m4 12.5 5 5L20 6.5"/></svg></span><span class="t">One accent, used sparingly</span></li>
+            <li><span class="box"></span><span class="t">Motion under 120 ms</span></li>
+          </ul>
+
+          <h2>Shortcuts</h2>
+          <table>
+            <thead>
+              <tr><th>Action</th><th>Keys</th><th>Scope</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Command palette</td><td class="kbd-cell">Ctrl K</td><td>global</td></tr>
+              <tr><td>Toggle preview</td><td class="kbd-cell">Ctrl ⇧ V</td><td>editor</td></tr>
+              <tr><td>Quick open</td><td class="kbd-cell">Ctrl P</td><td>workspace</td></tr>
+            </tbody>
+          </table>
+
+          <h2>Render pipeline</h2>
+          <div class="codeblock">
+            <div class="bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="name">render.ts</span></div>
+            <pre><span class="cb-kw">const</span> html = <span class="cb-kw">await</span> render(markdown, {
+  math: <span class="cb-bool">true</span>,
+  diagrams: <span class="cb-bool">true</span>,
+  <span class="cb-p">// sanitised by ammonia</span>
+});</pre>
+          </div>
+
+          <p>Inline math like <span class="math">E = mc²</span> stays readable at any size.</p>
+
+          <figure>
+            <div class="art">
+              <svg width="300" height="96" viewBox="0 0 300 96" fill="none">
+                <defs>
+                  <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#8b6bff" stop-opacity=".9"/>
+                    <stop offset="1" stop-color="#22d3ee" stop-opacity=".9"/>
+                  </linearGradient>
+                  <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#ffffff" stop-opacity=".22"/>
+                    <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <g opacity=".9">
+                  <rect x="18" y="20" width="86" height="52" rx="10" stroke="url(#g1)" stroke-width="1.4" fill="url(#g2)"/>
+                  <rect x="111" y="20" width="86" height="52" rx="10" stroke="url(#g1)" stroke-width="1.4"/>
+                  <rect x="204" y="20" width="86" height="52" rx="10" stroke="url(#g1)" stroke-width="1.4" fill="url(#g2)"/>
+                  <path d="M104 46h7M197 46h7" stroke="#8b6bff" stroke-width="1.4" stroke-linecap="round"/>
+                  <circle cx="61" cy="46" r="9" stroke="#22d3ee" stroke-width="1.4"/>
+                  <path d="M145 40h18M145 46h18M145 52h11" stroke="#8b6bff" stroke-width="1.4" stroke-linecap="round"/>
+                  <path d="m235 40 8 6-8 6" stroke="#22d3ee" stroke-width="1.4" stroke-linejoin="round"/>
+                </g>
+              </svg>
+            </div>
+            <figcaption><b>Figure 1</b> — Source, syntax tree, and rendered output stay one document.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- status -->
+  <footer class="statusbar">
+    <span class="item">
+      <svg class="i sm" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 8.2v7.6M18 9.2c0 4.4-4 4.8-6 5.4"/></svg>
+      <span class="mono">main</span>
+    </span>
+    <span class="vsep"></span>
+    <span class="item">Ln 29, Col 41</span>
+    <span class="item">214 words</span>
+    <span class="item">3.4 KB</span>
+    <span class="spacer"></span>
+    <span class="item hint"><svg class="i sm" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01"/></svg> Markdown · preview live</span>
+    <span class="vsep"></span>
+    <span class="item mono">UTF-8</span>
+  </footer>
+</div>
+
+<div class="caption">
+  <span class="tag">Mockup A</span>
+  <b>Aurora</b>
+  <span>— dark glass shell, gradient accent, soft depth, pill tabs, floating panes</span>
+</div>
+</body>
+</html>
