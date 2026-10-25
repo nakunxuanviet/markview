@@ -54,6 +54,8 @@
   --accent-gradient: linear-gradient(135deg, #8b6bff, #6d4dff 55%, #22d3ee);
   --accent-glow: 0 6px 18px rgba(124, 92, 255, 0.35);
   --selection-bg: rgba(124, 92, 255, 0.32);
+  --find-match-bg: rgba(124, 92, 255, 0.38);
+  --find-active-bg: #8f74ff;
   --focus-ring: 0 0 0 2px rgba(124, 92, 255, 0.28);
 
   /* Lines --------------------------------------------------------------- */

@@ -35,7 +35,6 @@ import {
 import { api } from "../api";
 import { darkTheme, lightTheme } from "../cmTheme";
 import { editorBus } from "../editorBus";
-import { FindBar } from "./FindBar";
 import { FormatBar } from "./FormatBar";
 import { editorRef } from "../editorRef";
 import { snippetSource } from "../snippets";
@@ -272,7 +271,6 @@ export function EditorPane() {
     <div id="editor-panel">
       <FormatBar />
       <div id="cm-editor" ref={hostRef} />
-      <FindBar />
     </div>
   );
 }

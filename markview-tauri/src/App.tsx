@@ -9,6 +9,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import { DiffDialog } from "./components/DiffDialog";
 import { EditorPane } from "./components/EditorPane";
 import { EmptyState } from "./components/EmptyState";
+import { FindBar } from "./components/FindBar";
 import { PreviewPane } from "./components/PreviewPane";
 import { PromptDialog } from "./components/PromptDialog";
 import { QuickOpen } from "./components/QuickOpen";
@@ -540,6 +541,7 @@ export function App() {
                 />
               )}
               <PreviewPane hidden={!previewShown} />
+              <FindBar />
             </div>
           </div>
         </div>

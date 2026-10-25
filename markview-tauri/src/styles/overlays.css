@@ -12,14 +12,14 @@
   top: 46px;
   right: 16px;
   z-index: 14000;
-  width: 460px;
+  width: 430px;
   max-width: calc(100% - 32px);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 3px;
+  padding: 3px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--bg-elevated);
   box-shadow: var(--shadow-2);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -30,33 +30,56 @@
   display: none;
 }
 
+/* Preview matches (CSS Custom Highlight API). */
+::highlight(markview-find) {
+  background-color: var(--find-match-bg);
+  color: inherit;
+}
+
+::highlight(markview-find-active) {
+  background-color: var(--find-active-bg);
+  color: var(--accent-contrast);
+}
+
 .find-row {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
+}
+
+/* Input with inline toggles, mirroring VS Code's find widget. */
+.find-input-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 2px 0 7px;
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: var(--bg-input);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.find-input-wrap:focus-within {
+  border-color: var(--border-active);
+  box-shadow: var(--focus-ring);
 }
 
 #find-input,
 #replace-input {
   flex: 1;
   min-width: 0;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text-primary);
   font-size: 12.5px;
   outline: none;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-#find-input:focus,
-#replace-input:focus {
-  border-color: var(--border-active);
-  box-shadow: var(--focus-ring);
 }
 
 #find-input::placeholder,
@@ -64,15 +87,25 @@
   color: var(--text-muted);
 }
 
+.find-toggles {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
 #find-bar button {
-  height: 26px;
-  min-width: 26px;
-  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 3px;
   border: 1px solid transparent;
-  border-radius: calc(var(--radius-sm) - 1px);
+  border-radius: 3px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
 }
 
@@ -82,77 +115,63 @@
 }
 
 #find-bar button svg {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   display: block;
 }
 
 #find-bar button.on {
   background: var(--accent-soft);
+  border-color: var(--accent-border);
   color: var(--text-accent);
 }
 
+#find-word {
+  text-decoration: underline;
+  text-underline-offset: 1px;
+}
+
 #find-count {
+  flex: none;
   min-width: 62px;
-  padding: 0 4px;
-  text-align: center;
+  padding: 0 4px 0 6px;
+  text-align: right;
   color: var(--text-muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-#find-bar label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 24px;
-  min-width: 26px;
-  padding: 0 5px;
-  border: 1px solid transparent;
-  border-radius: calc(var(--radius-sm) - 1px);
-  color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
+.find-icon {
+  width: 24px;
+  min-width: 24px;
 }
 
-#find-bar label:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
+.find-chevron svg {
+  transition: transform 0.12s ease;
 }
 
-#find-bar label:has(input:checked) {
-  color: var(--text-accent);
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-}
-
-#find-bar label input {
-  display: none;
-}
-
-#find-close {
-  margin-left: 2px;
+.find-chevron.on svg {
+  transform: rotate(90deg);
 }
 
 #find-close:hover {
   color: var(--danger-color) !important;
 }
 
-#replace-one,
-#replace-all {
-  min-width: 0 !important;
-  padding: 0 9px !important;
-  border-color: var(--border-color) !important;
-  background: var(--bg-input) !important;
-  font-size: 11px !important;
-  color: var(--text-secondary) !important;
+/* Replace row, revealed by the chevron. */
+#find-bar .find-action {
+  min-width: 0;
+  padding: 0 8px;
+  border-color: var(--border-color);
+  background: var(--bg-input);
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
-#replace-one:hover,
-#replace-all:hover {
-  background: var(--bg-hover) !important;
-  color: var(--text-primary) !important;
+#find-bar .find-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 body[data-theme="light"] #find-bar {
@@ -160,10 +179,6 @@ body[data-theme="light"] #find-bar {
   border-radius: 2px;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-}
-
-body[data-theme="light"] #find-bar label:has(input:checked) {
-  background: var(--accent-soft);
 }
 
 /* --------------------------------------------------------------------------
