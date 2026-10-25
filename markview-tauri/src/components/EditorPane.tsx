@@ -32,6 +32,7 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 
+import { api } from "../api";
 import { darkTheme, lightTheme } from "../cmTheme";
 import { editorBus } from "../editorBus";
 import { FindBar } from "./FindBar";
@@ -40,6 +41,7 @@ import { editorRef } from "../editorRef";
 import { snippetSource } from "../snippets";
 import { registerEditorScroller } from "../scrollSync";
 import { useStore } from "../store";
+import { toast } from "../toast";
 import { countWords } from "../utils";
 
 export function EditorPane() {
@@ -307,7 +309,6 @@ async function handleImagePaste(event: ClipboardEvent): Promise<void> {
   const state = useStore.getState();
   const tab = state.activeId ? state.tabs[state.activeId] : null;
   if (!tab?.path) {
-    const { toast } = await import("../toast");
     toast.show("Save the file first before pasting images.", { type: "warn" });
     return;
   }
@@ -318,16 +319,13 @@ async function handleImagePaste(event: ClipboardEvent): Promise<void> {
   const folder = `${tab.path.replace(/\\/g, "/").replace(/\/[^/]*$/, "")}/assets`;
 
   try {
-    const { api } = await import("../api");
     const result = await api.saveImage(folder, filename, base64);
     if (result?.error) {
-      const { toast } = await import("../toast");
       toast.show(result.error, { type: "error" });
       return;
     }
     editorRef.insertText?.(`![${filename}](assets/${filename})`);
   } catch (error) {
-    const { toast } = await import("../toast");
     toast.show(`Image paste failed: ${String(error)}`, { type: "error" });
   }
 }

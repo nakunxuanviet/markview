@@ -1,7 +1,8 @@
 import {
+  IconApp,
+  IconAppLight,
   IconCommand,
   IconFolder,
-  IconLogo,
   IconMoon,
   IconNewFile,
   IconOpenFile,
@@ -35,9 +36,11 @@ export function AppBar() {
     <header id="app-bar">
       <div className="brand">
         <span className="logo" aria-hidden="true">
-          {theme === "dark" ? <IconLogo /> : "M"}
+          {theme === "dark" ? <IconApp /> : <IconAppLight />}
         </span>
-        <span className="brand-name">MarkView</span>
+        <span className="brand-name">
+          Mark<em>View</em>
+        </span>
       </div>
 
       <div className="appbar-group">
@@ -142,7 +145,9 @@ export function AppBar() {
       <button
         id="btn-toggle-theme"
         className="icon-btn"
-        title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+        title={
+          theme === "dark" ? "Switch to light theme" : "Switch to dark theme"
+        }
         onClick={() => void store.toggleTheme()}
       >
         {theme === "dark" ? <IconSun /> : <IconMoon />}

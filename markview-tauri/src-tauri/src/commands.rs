@@ -623,6 +623,34 @@ pub fn open_default_apps_settings() -> Value {
     }
 }
 
+/// Repaints the native title bar after a theme change.
+///
+/// Windows can keep a stale non-client frame when the theme is switched while
+/// the window is still starting up, even though the window theme itself is
+/// already correct. Tao only redraws the frame when the preferred theme
+/// actually changes, so replaying `WM_NCACTIVATE` is the reliable way to force
+/// the title bar to pick up the new colours.
+#[cfg(target_os = "windows")]
+fn force_titlebar_repaint(hwnd: isize) {
+    const WM_NCACTIVATE: u32 = 0x0086;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn DefWindowProcW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+        fn GetActiveWindow() -> isize;
+    }
+
+    unsafe {
+        if GetActiveWindow() == hwnd {
+            DefWindowProcW(hwnd, WM_NCACTIVATE, 0, 0);
+            DefWindowProcW(hwnd, WM_NCACTIVATE, 1, 0);
+        } else {
+            DefWindowProcW(hwnd, WM_NCACTIVATE, 1, 0);
+            DefWindowProcW(hwnd, WM_NCACTIVATE, 0, 0);
+        }
+    }
+}
+
 /// Keeps the native window chrome in step with the in-app theme.
 #[tauri::command]
 pub fn set_window_theme(window: tauri::Window, theme: String) -> Result<(), String> {
@@ -633,7 +661,18 @@ pub fn set_window_theme(window: tauri::Window, theme: String) -> Result<(), Stri
     };
     window
         .set_theme(Some(mode))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    // `set_theme` only queues the change, so force the repaint afterwards on
+    // the main thread. The extra repaint is cheap and also covers the startup
+    // window, where the saved theme arrives after the frame was first drawn.
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        let hwnd = hwnd.0 as isize;
+        let _ = window.run_on_main_thread(move || force_titlebar_repaint(hwnd));
+    }
+
+    Ok(())
 }
 
 // === SETTINGS HELPERS (used by the frontend settings dialog) ===

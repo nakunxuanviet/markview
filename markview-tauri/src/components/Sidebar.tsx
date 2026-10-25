@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { api } from "../api";
-import { COPYRIGHT } from "../branding";
+import { COPYRIGHT_HOLDER, COPYRIGHT_YEAR, LICENSE_NAME } from "../branding";
 import { contextMenu, type MenuItem } from "../contextMenu";
 import { editorRef } from "../editorRef";
 import {
+  IconApp,
+  IconAppLight,
   IconChevronRight,
   IconFolder,
   IconLayers,
@@ -83,6 +85,7 @@ export function Sidebar() {
     state.activeId ? (state.tabs[state.activeId]?.path ?? null) : null,
   );
   const headings = useStore((state) => state.headings);
+  const theme = useStore((state) => state.theme);
   const visibleExtensions = useStore(
     (state) => state.settings.files.visible_extensions,
   );
@@ -138,7 +141,7 @@ export function Sidebar() {
 
   return (
     <div id="sidebar" style={{ width: sidebarWidth }}>
-      <div id="sidebar-header">
+      <div id="sidebar-header" className={welcomeShown ? "hidden" : undefined}>
         <div className="sidebar-title-row">
           <span className="side-label">Explorer</span>
           <div className="side-actions">
@@ -238,39 +241,65 @@ export function Sidebar() {
       </div>
 
       <div id="sidebar-welcome" className={welcomeShown ? "" : "hidden"}>
-        <div className="welcome-content">
-          <span className="welcome-logo" aria-hidden="true">
-            M
+        <div className="welcome-brand">
+          <span className="welcome-mark" aria-hidden="true">
+            {theme === "dark" ? <IconApp /> : <IconAppLight />}
           </span>
-          <h2>MarkView</h2>
-          <p>Open a folder to browse, edit and preview your Markdown files.</p>
-          <button id="btn-welcome-open" onClick={() => void store.openFolder()}>
-            <IconFolder />
-            Open folder
-          </button>
-          {recentFolders.length > 0 && (
-            <div className="recent-wrap">
-              <span className="side-label">Recent folders</span>
-              <div id="recent-folders-list">
-                {recentFolders.map((folder) => (
-                  <div
-                    className="recent-item"
-                    key={folder}
-                    title={folder}
-                    onClick={() => void store.loadFolder(folder)}
-                  >
-                    <IconFolder />
-                    <span>{basename(folder)}</span>
-                  </div>
-                ))}
-              </div>
+          <div className="welcome-brand-text">
+            <div className="welcome-word">
+              Mark<em>View</em>
             </div>
-          )}
-          <div className="welcome-footer">
-            <span>{COPYRIGHT}</span>
-            <span className="welcome-footer-dot" />
-            <span>v{version}</span>
+            <div className="welcome-tag">Markdown, considered.</div>
           </div>
+        </div>
+
+        <button id="btn-welcome-open" onClick={() => void store.openFolder()}>
+          <IconFolder />
+          <span>Open folder</span>
+          <kbd className="mv-kbd">Ctrl Shift O</kbd>
+        </button>
+        <p className="welcome-hint">or drop a folder anywhere in this window</p>
+
+        {recentFolders.length > 0 && (
+          <div className="welcome-recent">
+            <div className="welcome-sec-head">
+              <span>Recent</span>
+              <span className="welcome-sec-line" />
+            </div>
+            <div id="recent-folders-list">
+              {recentFolders.map((folder) => (
+                <div
+                  className="recent-item"
+                  key={folder}
+                  title={folder}
+                  onClick={() => void store.loadFolder(folder)}
+                >
+                  <span className="recent-icon">
+                    <IconFolder />
+                  </span>
+                  <span className="recent-body">
+                    <span className="recent-name">{basename(folder)}</span>
+                    <span className="recent-path">{folder}</span>
+                  </span>
+                  <IconChevronRight className="recent-go" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="welcome-ghost" aria-hidden="true">
+          Mark<em>View</em>
+        </div>
+
+        <div className="welcome-footer">
+          <span className="welcome-foot-mark">©</span>
+          <span>
+            {COPYRIGHT_YEAR} <b>{COPYRIGHT_HOLDER}</b>
+          </span>
+          <span className="welcome-footer-dot" />
+          <span>{LICENSE_NAME}</span>
+          <span className="welcome-ver">v{version}</span>
         </div>
       </div>
 

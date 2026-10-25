@@ -92,9 +92,8 @@
   --switch-knob: #fffdf9;
 
   /* Brand --------------------------------------------------------------- */
-  --logo-bg: #1b1a16;
-  --logo-fg: #fbf9f3;
-  --logo-shadow: none;
+  --ghost-top: rgba(27, 26, 22, 0.085);
+  --ghost-bottom: rgba(27, 26, 22, 0.012);
 
   /* Controls ------------------------------------------------------------ */
   --seg-active-bg: transparent;

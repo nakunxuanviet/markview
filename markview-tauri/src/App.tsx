@@ -72,6 +72,21 @@ export function App() {
     });
   }, [theme]);
 
+  // Windows can keep a stale non-client frame when the saved theme lands
+  // while the window is still starting up. Re-apply once boot finishes and
+  // whenever the window regains focus so the native title bar stays in sync.
+  useEffect(() => {
+    if (!ready) return;
+    const syncNativeTheme = () => {
+      void api.setWindowTheme(useStore.getState().theme).catch(() => {
+        /* native chrome is best-effort */
+      });
+    };
+    syncNativeTheme();
+    window.addEventListener("focus", syncNativeTheme);
+    return () => window.removeEventListener("focus", syncNativeTheme);
+  }, [ready]);
+
   useLayoutEffect(() => {
     applyAppearance(settings.appearance);
     setScrollSyncEnabled(settings.preview.scroll_sync !== false);

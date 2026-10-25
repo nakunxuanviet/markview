@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { ReactNode, SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
@@ -19,11 +20,99 @@ function Svg({ children, ...props }: IconProps & { children: ReactNode }) {
   );
 }
 
-export function IconLogo(props: IconProps) {
+/* Brand ------------------------------------------------------------------ */
+
+/** Four ribbon facets of the folded M, in 64px brand space. */
+const MARK_FACETS = [
+  "M10 14h10v40H10z",
+  "M20 14l12 16v20L20 34z",
+  "M32 30l12-16v20L32 50z",
+  "M44 14h10v40H44z",
+];
+
+const MARK_SEAMS = "M20 14v20M32 30v20M44 14v20";
+const MARK_VALLEY = "M20 34l12 16 12-16";
+
+/** Gradient ids must stay unique: several marks can share one document. */
+function useGradientId(prefix: string): string {
+  return `${prefix}-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+}
+
+/** App icon — Aurora: gradient squircle, ink ribbon. */
+export function IconApp(props: IconProps) {
+  const tile = useGradientId("mv-tile");
   return (
-    <Svg strokeWidth={2} {...props}>
-      <path d="M4 18V7l8 6 8-6v11" />
-    </Svg>
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" {...props}>
+      <defs>
+        <linearGradient
+          id={tile}
+          x1="8"
+          y1="4"
+          x2="58"
+          y2="62"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0" stopColor="#a184ff" />
+          <stop offset="0.5" stopColor="#6d4dff" />
+          <stop offset="1" stopColor="#22d3ee" />
+        </linearGradient>
+      </defs>
+      <rect width="64" height="64" rx="15" fill={`url(#${tile})`} />
+      <rect
+        x="0.75"
+        y="0.75"
+        width="62.5"
+        height="62.5"
+        rx="14.25"
+        stroke="#fff"
+        strokeOpacity="0.16"
+        strokeWidth="1.5"
+      />
+      <g transform="translate(2.91 1.09) scale(0.909)">
+        {MARK_FACETS.map((d) => (
+          <path key={d} d={d} fill="#080b13" />
+        ))}
+        <path
+          d={MARK_SEAMS}
+          stroke="#fff"
+          strokeOpacity="0.1"
+          strokeWidth="1"
+        />
+        <path
+          d={MARK_VALLEY}
+          stroke="#000"
+          strokeOpacity="0.18"
+          strokeWidth="1"
+        />
+      </g>
+    </svg>
+  );
+}
+
+/** App icon — Editorial: ink tile, paper ribbon. */
+export function IconAppLight(props: IconProps) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true" {...props}>
+      <rect width="64" height="64" rx="3" fill="#1b1a16" />
+      <g transform="translate(2.91 1.09) scale(0.909)">
+        <path d={MARK_FACETS[0]} fill="#fbf9f3" />
+        <path d={MARK_FACETS[1]} fill="#fbf9f3" opacity="0.95" />
+        <path d={MARK_FACETS[2]} fill="#fbf9f3" opacity="0.88" />
+        <path d={MARK_FACETS[3]} fill="#fbf9f3" opacity="0.8" />
+        <path
+          d={MARK_SEAMS}
+          stroke="#1b1a16"
+          strokeOpacity="0.32"
+          strokeWidth="1"
+        />
+        <path
+          d={MARK_VALLEY}
+          stroke="#1b1a16"
+          strokeOpacity="0.28"
+          strokeWidth="1"
+        />
+      </g>
+    </svg>
   );
 }
 

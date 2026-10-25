@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { api, pickFolder, pickSavePath } from "./api";
+import { api, pickFile, pickFolder, pickSavePath } from "./api";
 import { editorRef } from "./editorRef";
 import { toast } from "./toast";
 import type {
@@ -331,7 +331,8 @@ export const useStore = create<AppStore>((set, get) => ({
       } catch {
         /* ignore */
       }
-      get().createTab();
+      // Deliberately start with no tab: the sidebar welcome and the editor
+      // empty state carry the first-run experience instead of a blank file.
     }
 
     set({ ready: true });
@@ -906,7 +907,6 @@ async function pickFolderSafe(): Promise<string | null> {
 
 async function pickFileSafe(): Promise<string | null> {
   try {
-    const { pickFile } = await import("./api");
     return await pickFile();
   } catch (error) {
     console.error("File dialog failed", error);

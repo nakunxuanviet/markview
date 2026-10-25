@@ -90,9 +90,8 @@
   --switch-knob: #8b94ad;
 
   /* Brand --------------------------------------------------------------- */
-  --logo-bg: linear-gradient(145deg, #9a7bff, #7c5cff 45%, #22d3ee);
-  --logo-fg: #070a12;
-  --logo-shadow: 0 6px 20px rgba(124, 92, 255, 0.45);
+  --ghost-top: rgba(233, 236, 246, 0.1);
+  --ghost-bottom: rgba(233, 236, 246, 0.015);
 
   /* Controls ------------------------------------------------------------ */
   --seg-active-bg: linear-gradient(

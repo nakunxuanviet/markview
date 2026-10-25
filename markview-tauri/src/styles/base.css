@@ -394,11 +394,6 @@ body.view-mode-single.single-preview #preview-panel {
   border-left: 0;
 }
 
-body.view-mode-single.single-preview .preview-bar {
-  max-width: 920px;
-  margin: 0 auto;
-}
-
 .hidden {
   display: none !important;
 }
