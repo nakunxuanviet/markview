@@ -2,9 +2,13 @@
 node_modules/
 
 # Build output
-markview-tauri/dist/
-markview-tauri/src-tauri/target/
+dist/
+src-tauri/target/
 *.tsbuildinfo
 
 # Local environment
 .env
+
+# Local-only notes and design references
+docs/
+mockups/

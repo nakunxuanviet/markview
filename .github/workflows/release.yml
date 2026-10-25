@@ -20,16 +20,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: markview-tauri/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: markview-tauri/src-tauri -> target
+          workspaces: src-tauri -> target
 
       - name: Install frontend dependencies
-        working-directory: markview-tauri
         run: npm ci
 
       - uses: tauri-apps/tauri-action@v0
@@ -38,7 +37,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: markview-tauri
           tagName: ${{ github.ref_name }}
           releaseName: "MarkView ${{ github.ref_name }}"
           releaseBody: "See the assets below to download and install this version."
