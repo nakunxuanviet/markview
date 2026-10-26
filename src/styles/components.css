@@ -223,8 +223,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: none;
-  min-width: 112px;
+  flex: 0 1 auto;
+  min-width: 84px;
   max-width: 230px;
   margin: 5px 1px;
   padding: 0 8px 0 11px;
@@ -342,6 +342,45 @@
 #btn-new-tab svg {
   width: 13px;
   height: 13px;
+}
+
+/* Scroll arrows, only rendered while the strip overflows. */
+.tab-scroll {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 0 2px;
+}
+
+.tab-scroll-btn {
+  width: 20px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.tab-scroll-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tab-scroll-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.tab-scroll-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.tab-scroll-btn.prev svg {
+  transform: rotate(180deg);
 }
 
 .tab-status {
@@ -1854,6 +1893,22 @@ body[data-theme="light"] #btn-new-tab {
 
 body[data-theme="light"] #btn-new-tab:hover {
   background: none;
+  color: var(--text-primary);
+}
+
+body[data-theme="light"] .tab-scroll {
+  padding: 0;
+}
+
+body[data-theme="light"] .tab-scroll-btn {
+  width: 26px;
+  height: 40px;
+  border: 0;
+  border-radius: 0;
+}
+
+body[data-theme="light"] .tab-scroll-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, transparent, var(--bg-hover));
   color: var(--text-primary);
 }
 
