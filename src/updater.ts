@@ -17,6 +17,22 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * Update failures can carry the release endpoint in their message, and that
+ * URL must never reach the UI. Keep the raw error in the console instead and
+ * show a short, actionable message.
+ */
+function friendlyUpdateError(error: unknown): string {
+  const text = errorText(error);
+  if (/timed? ?out|timeout/i.test(text)) {
+    return "Could not check for updates: the request timed out.";
+  }
+  if (/request|connect|network|dns|fetch|sending/i.test(text)) {
+    return "Could not check for updates: check your internet connection.";
+  }
+  return "Could not check for updates. Please try again later.";
+}
+
+/**
  * Check GitHub Releases for a newer signed build and download it in the
  * background. Installing on Windows means quitting the app so the NSIS
  * installer can replace it, so the user is asked before that happens.
@@ -74,7 +90,7 @@ export async function checkForUpdates(
     await relaunch();
   } catch (error) {
     if (!silent) {
-      toast.show(`Could not check for updates: ${errorText(error)}`, {
+      toast.show(friendlyUpdateError(error), {
         type: "error",
         duration: 6000,
       });

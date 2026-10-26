@@ -1440,7 +1440,7 @@ body[data-theme="light"] .mv-modal-title {
 }
 
 .toast {
-  max-width: 380px;
+  max-width: min(380px, calc(100vw - 40px));
   padding: 10px 14px;
   border: 1px solid var(--border-strong);
   border-left: 2px solid var(--text-accent);
@@ -1452,6 +1452,7 @@ body[data-theme="light"] .mv-modal-title {
   line-height: 1.5;
   cursor: pointer;
   pointer-events: auto;
+  overflow-wrap: anywhere;
   opacity: 0;
   transform: translateY(6px);
   transition:
