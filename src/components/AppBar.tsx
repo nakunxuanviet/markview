@@ -7,7 +7,6 @@ import {
   IconNewFile,
   IconOpenFile,
   IconOpenFolder,
-  IconSave,
   IconSearch,
   IconSettings,
   IconSidebar,
@@ -67,14 +66,6 @@ export function AppBar() {
           onClick={() => void store.openFolder()}
         >
           <IconOpenFolder />
-        </button>
-        <button
-          id="btn-save"
-          className="icon-btn"
-          title="Save (Ctrl+S)"
-          onClick={() => void store.saveActive()}
-        >
-          <IconSave />
         </button>
       </div>
 
