@@ -8,7 +8,9 @@ export async function saveActiveAs(): Promise<void> {
   const state = useStore.getState();
   const tab = state.activeId ? state.tabs[state.activeId] : null;
   if (!tab) return;
-  const content = editorRef.view ? editorRef.view.state.doc.toString() : tab.content;
+  const content = editorRef.view
+    ? editorRef.view.state.doc.toString()
+    : tab.content;
   const path = await pickSavePath(tab.filename);
   if (!path) return;
   try {
@@ -17,6 +19,7 @@ export async function saveActiveAs(): Promise<void> {
       toast.show(result.error, { type: "error" });
       return;
     }
+    useStore.getState().touchTab(tab.id);
     useStore.setState((current) => ({
       tabs: {
         ...current.tabs,
@@ -60,19 +63,26 @@ export async function reloadAllFromDisk(): Promise<void> {
       duration: 5000,
     });
   } else {
-    toast.show("Reloaded all files from disk", { type: "success", duration: 1500 });
+    toast.show("Reloaded all files from disk", {
+      type: "success",
+      duration: 1500,
+    });
   }
 }
 
 export function openFind(replace: boolean): void {
   useStore.setState({ findOpen: true });
-  window.dispatchEvent(new CustomEvent("markview:find", { detail: { replace } }));
+  window.dispatchEvent(
+    new CustomEvent("markview:find", { detail: { replace } }),
+  );
 }
 
 function activeContent(): string {
   const state = useStore.getState();
   const tab = state.activeId ? state.tabs[state.activeId] : null;
-  return editorRef.view ? editorRef.view.state.doc.toString() : tab?.content ?? "";
+  return editorRef.view
+    ? editorRef.view.state.doc.toString()
+    : (tab?.content ?? "");
 }
 
 export async function compareWithSaved(): Promise<void> {

@@ -458,6 +458,24 @@ body[data-theme="light"] .cp-item {
   color: var(--text-primary);
 }
 
+#sif-cancel {
+  height: 26px;
+  padding: 0 8px;
+  flex: none;
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: none;
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+#sif-cancel:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 .sif-options {
   flex: none;
   display: flex;

@@ -1,6 +1,7 @@
 //! Tauri commands — the whole IPC surface exposed to the React frontend.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
@@ -63,7 +64,7 @@ fn tree_result(state: &AppState, path: &Path) -> Value {
 
 // === FOLDER ===
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_folder_path(app: AppHandle, state: State<'_, AppState>, path: String) -> Value {
     let raw = PathBuf::from(&path);
     if !raw.is_dir() {
@@ -76,7 +77,7 @@ pub fn open_folder_path(app: AppHandle, state: State<'_, AppState>, path: String
     tree_result(&state, &real)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_folder_tree(app: AppHandle, state: State<'_, AppState>, path: String) -> Value {
     let Some(valid) = validate_path(&state, &path, false, true, false, true) else {
         return err("Invalid path");
@@ -89,7 +90,7 @@ pub fn get_folder_tree(app: AppHandle, state: State<'_, AppState>, path: String)
     tree_result(&state, &valid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_folder_children(state: State<'_, AppState>, path: String) -> Value {
     let Some(valid) = validate_path(&state, &path, false, false, false, true) else {
         return err("Invalid path");
@@ -149,7 +150,7 @@ pub fn move_item(state: State<'_, AppState>, src: String, dest_folder: String) -
     folders::move_item(&src_valid, &dest_valid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn search_filenames(state: State<'_, AppState>, query: String) -> Value {
     let Some(root) = workspace(&state) else {
         return json!([]);
@@ -216,7 +217,7 @@ pub fn get_recent_folders(state: State<'_, AppState>) -> Value {
 
 // === SESSION ===
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_session(state: State<'_, AppState>, data: Value) -> bool {
     let mut payload = data;
     if let Some(obj) = payload.as_object_mut() {
@@ -229,12 +230,12 @@ pub fn save_session(state: State<'_, AppState>, data: Value) -> bool {
         );
     }
     match state.session.lock() {
-        Ok(session) => session.save(&payload),
+        Ok(session) => session.save_merged(&payload),
         Err(_) => false,
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_session(state: State<'_, AppState>) -> Value {
     let session = match state.session.lock() {
         Ok(session) => session.load(),
@@ -303,13 +304,13 @@ pub fn load_session(state: State<'_, AppState>) -> Value {
 #[tauri::command]
 pub fn backup_tab(state: State<'_, AppState>, tab_id: String, content: String) {
     if let Ok(session) = state.session.lock() {
-        session.write_backup(&tab_id, &content);
+        let _ = session.write_backup(&tab_id, &content);
     }
 }
 
 // === MARKDOWN ===
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn render_markdown(text: String) -> Value {
     markdown::render(&text)
 }
@@ -407,40 +408,61 @@ pub fn reveal_in_explorer(state: State<'_, AppState>, path: String) -> Value {
 
 // === SEARCH ===
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn search_in_files(
     state: State<'_, AppState>,
+    request_id: u64,
     query: String,
     folder: Option<String>,
     options: Option<SearchOptions>,
 ) -> Value {
+    state.search_request.store(request_id, Ordering::Relaxed);
+
     let search_root = match folder {
         Some(folder) => match validate_path(&state, &folder, false, true, false, true) {
             Some(path) => Some(path),
-            None => return json!([]),
+            None => return json!({ "request_id": request_id, "cancelled": false, "hits": [] }),
         },
         None => None,
     };
 
     let Some(root) = workspace(&state) else {
-        return json!([]);
+        return json!({ "request_id": request_id, "cancelled": false, "hits": [] });
     };
 
     let opts = options.unwrap_or_default();
-    let results = match state.settings.lock() {
-        Ok(settings) => {
-            search::search_in_files(&root, &query, search_root.as_deref(), &settings, &opts)
-        }
-        Err(_) => Vec::new(),
+    let outcome = match state.settings.lock() {
+        Ok(settings) => search::search_in_files_cancellable(
+            &root,
+            &query,
+            search_root.as_deref(),
+            &settings,
+            &opts,
+            &state.search_request,
+            request_id,
+        ),
+        Err(_) => search::SearchOutcome {
+            hits: Vec::new(),
+            cancelled: false,
+        },
     };
-    json!(results)
+    json!({
+        "request_id": request_id,
+        "cancelled": outcome.cancelled,
+        "hits": outcome.hits,
+    })
+}
+
+#[tauri::command]
+pub fn cancel_search(state: State<'_, AppState>) {
+    state.search_request.store(u64::MAX, Ordering::Relaxed);
 }
 
 // === SESSION RESTORE ===
 
 /// Re-establish workspace + file trust after a restart, then return a fresh
 /// folder tree. Restored session tabs can then be saved again.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_workspace(
     app: AppHandle,
     state: State<'_, AppState>,

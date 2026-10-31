@@ -53,6 +53,12 @@ export interface SearchHit {
   text: string;
 }
 
+export interface SearchResponse {
+  request_id: number;
+  cancelled: boolean;
+  hits: SearchHit[];
+}
+
 export interface FileHit {
   name: string;
   path: string;

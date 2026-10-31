@@ -1,6 +1,7 @@
 //! Full-text search across the workspace.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use glob::{MatchOptions, Pattern};
 use regex::{Regex, RegexBuilder};
@@ -79,18 +80,32 @@ fn should_skip_dir(name: &str, exclude: &[Pattern]) -> bool {
         .any(|p| p.matches_with(name, MatchOptions::new()))
 }
 
-pub fn search_in_files(
+pub struct SearchOutcome {
+    pub hits: Vec<Value>,
+    pub cancelled: bool,
+}
+
+pub fn search_in_files_cancellable(
     root: &Path,
     query: &str,
     folder: Option<&Path>,
     settings: &SettingsStore,
     opts: &SearchOptions,
-) -> Vec<Value> {
+    generation: &AtomicU64,
+    request_id: u64,
+) -> SearchOutcome {
+    let mut cancelled = false;
     let Some(re) = compile(query, opts) else {
-        return Vec::new();
+        return SearchOutcome {
+            hits: Vec::new(),
+            cancelled: false,
+        };
     };
     if query.is_empty() || query.len() > 500 {
-        return Vec::new();
+        return SearchOutcome {
+            hits: Vec::new(),
+            cancelled: false,
+        };
     }
 
     let search_root = folder.unwrap_or(root);
@@ -128,6 +143,10 @@ pub fn search_in_files(
         });
 
     'outer: for entry in walker.filter_map(|e| e.ok()) {
+        if generation.load(Ordering::Relaxed) != request_id {
+            cancelled = true;
+            break;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
@@ -177,6 +196,10 @@ pub fn search_in_files(
         let text = String::from_utf8_lossy(&raw);
 
         for (idx, line) in text.lines().enumerate() {
+            if idx % 256 == 0 && generation.load(Ordering::Relaxed) != request_id {
+                cancelled = true;
+                break 'outer;
+            }
             if let Some(m) = re.find(line) {
                 if m.start() != m.end() {
                     let snippet: String = line.trim().chars().take(200).collect();
@@ -194,5 +217,8 @@ pub fn search_in_files(
         }
     }
 
-    results
+    SearchOutcome {
+        hits: results,
+        cancelled,
+    }
 }

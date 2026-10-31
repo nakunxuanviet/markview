@@ -26,6 +26,7 @@ export function SearchInFiles() {
   const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const timer = useRef<number | undefined>(undefined);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 30);
@@ -35,30 +36,48 @@ export function SearchInFiles() {
     if (!open) return;
     if (timer.current) window.clearTimeout(timer.current);
     if (!query.trim() || !workspace) {
+      requestIdRef.current += 1;
       setResults([]);
+      setSearching(false);
       return;
     }
+    const requestId = ++requestIdRef.current;
     timer.current = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const hits = await api.searchInFiles(query, null, {
-          case_sensitive: caseSensitive,
-          whole_word: wholeWord,
-          regex: useRegex,
-          include,
-          exclude,
-        });
-        setResults(hits ?? []);
+        const response = await api.searchInFiles(
+          query,
+          null,
+          {
+            case_sensitive: caseSensitive,
+            whole_word: wholeWord,
+            regex: useRegex,
+            include,
+            exclude,
+          },
+          requestId,
+        );
+        if (requestId !== requestIdRef.current) return;
+        setResults(response?.hits ?? []);
       } catch {
-        setResults([]);
+        if (requestId === requestIdRef.current) setResults([]);
       } finally {
-        setSearching(false);
+        if (requestId === requestIdRef.current) setSearching(false);
       }
     }, 300);
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [query, caseSensitive, wholeWord, useRegex, include, exclude, workspace, open]);
+  }, [
+    query,
+    caseSensitive,
+    wholeWord,
+    useRegex,
+    include,
+    exclude,
+    workspace,
+    open,
+  ]);
 
   const groups = useMemo<GroupedResults[]>(() => {
     const map = new Map<string, GroupedResults>();
@@ -67,7 +86,11 @@ export function SearchInFiles() {
       if (existing) {
         existing.hits.push(hit);
       } else {
-        map.set(hit.file, { file: hit.file, filename: hit.filename, hits: [hit] });
+        map.set(hit.file, {
+          file: hit.file,
+          filename: hit.filename,
+          hits: [hit],
+        });
       }
     }
     return [...map.values()];
@@ -75,7 +98,16 @@ export function SearchInFiles() {
 
   if (!open) return null;
 
-  const close = () => useStore.setState({ searchFilesOpen: false });
+  const cancel = () => {
+    requestIdRef.current += 1;
+    setSearching(false);
+    void api.cancelSearch().catch(() => undefined);
+  };
+
+  const close = () => {
+    if (searching) cancel();
+    useStore.setState({ searchFilesOpen: false });
+  };
 
   const openHit = async (hit: SearchHit) => {
     const store = useStore.getState();
@@ -99,6 +131,16 @@ export function SearchInFiles() {
             if (event.key === "Escape") close();
           }}
         />
+        {searching && (
+          <button
+            id="sif-cancel"
+            title="Cancel search"
+            onClick={cancel}
+            style={{ flex: "none" }}
+          >
+            Cancel
+          </button>
+        )}
         <button id="sif-close" title="Close" onClick={close}>
           <IconX />
         </button>
@@ -154,7 +196,8 @@ export function SearchInFiles() {
         {groups.map((group) => (
           <div className="sif-file-group" key={group.file}>
             <div className="sif-filename">
-              {group.filename} <span className="sif-count">({group.hits.length})</span>
+              {group.filename}{" "}
+              <span className="sif-count">({group.hits.length})</span>
             </div>
             {group.hits.map((hit, index) => (
               <div
@@ -164,7 +207,9 @@ export function SearchInFiles() {
                 onClick={() => void openHit(hit)}
               >
                 <span className="sif-line-num">{hit.line}</span>
-                <span className="sif-text">{highlight(hit.text, query, caseSensitive, useRegex)}</span>
+                <span className="sif-text">
+                  {highlight(hit.text, query, caseSensitive, useRegex)}
+                </span>
               </div>
             ))}
           </div>

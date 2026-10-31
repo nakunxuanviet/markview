@@ -37,21 +37,30 @@ import { darkTheme, lightTheme } from "../cmTheme";
 import { editorBus } from "../editorBus";
 import { FormatBar } from "./FormatBar";
 import { editorRef } from "../editorRef";
+import { EDITOR_STATE_CACHE } from "../previewConfig";
 import { snippetSource } from "../snippets";
 import { registerEditorScroller } from "../scrollSync";
 import { useStore } from "../store";
 import { toast } from "../toast";
 import { countWords } from "../utils";
 
+const encoder = new TextEncoder();
+
 export function EditorPane() {
   const hostRef = useRef<HTMLDivElement>(null);
-  const silent = useRef(false);
+  const stateCache = useRef(new Map<string, EditorState>());
+  const currentTabRef = useRef<string | null>(null);
 
   const themeCompartment = useRef(new Compartment());
   const lineNumberCompartment = useRef(new Compartment());
   const wrapCompartment = useRef(new Compartment());
   const tabSizeCompartment = useRef(new Compartment());
   const bracketCompartment = useRef(new Compartment());
+
+  const statsRef = useRef({ words: 0, bytes: 0 });
+  const statusFrame = useRef<number | undefined>(undefined);
+  const statusTimer = useRef<number | undefined>(undefined);
+  const statusView = useRef<EditorView | null>(null);
 
   const activeId = useStore((state) => state.activeId);
   const theme = useStore((state) => state.theme);
@@ -67,107 +76,211 @@ export function EditorPane() {
     (state) => state.settings.editor.match_brackets,
   );
 
-  const publishStatus = useCallback((view: EditorView) => {
+  const dispatchStatus = useCallback((view: EditorView) => {
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
-    const content = view.state.doc.toString();
     window.dispatchEvent(
       new CustomEvent("markview:status", {
         detail: {
           line: line.number,
           col: head - line.from + 1,
-          words: countWords(content),
-          chars: content.length,
-          bytes: new Blob([content]).size,
+          words: statsRef.current.words,
+          chars: view.state.doc.length,
+          bytes: statsRef.current.bytes,
         },
       }),
     );
   }, []);
 
-  // Create the editor once.
+  /**
+   * Position follows the caret immediately; word/byte counts are recomputed
+   * 200 ms after the last change. This keeps a 1 MB document cheap per key.
+   */
+  const publishStatus = useCallback(
+    (view: EditorView, immediate = false) => {
+      statusView.current = view;
+      if (statusFrame.current === undefined) {
+        statusFrame.current = window.requestAnimationFrame(() => {
+          statusFrame.current = undefined;
+          const current = statusView.current;
+          if (current) dispatchStatus(current);
+        });
+      }
+      if (statusTimer.current !== undefined) {
+        window.clearTimeout(statusTimer.current);
+        statusTimer.current = undefined;
+      }
+      const compute = () => {
+        statusTimer.current = undefined;
+        const current = statusView.current;
+        if (!current) return;
+        const text = current.state.doc.toString();
+        statsRef.current = {
+          words: countWords(text),
+          bytes: encoder.encode(text).length,
+        };
+        dispatchStatus(current);
+      };
+      if (immediate) compute();
+      else statusTimer.current = window.setTimeout(compute, 200);
+    },
+    [dispatchStatus],
+  );
+
+  const createState = useCallback(
+    (content: string, cursor: number) => {
+      const settings = useStore.getState();
+      const tabSizeValue = settings.settings.editor.tab_size || 4;
+      return EditorState.create({
+        doc: content,
+        selection: {
+          anchor: Math.max(0, Math.min(cursor, content.length)),
+        },
+        extensions: [
+          themeCompartment.current.of(htmlToEditorTheme(settings.theme)),
+          lineNumberCompartment.current.of(
+            settings.settings.appearance.show_line_numbers !== false
+              ? lineNumbers()
+              : [],
+          ),
+          wrapCompartment.current.of(
+            settings.settings.editor.word_wrap ? EditorView.lineWrapping : [],
+          ),
+          tabSizeCompartment.current.of(EditorState.tabSize.of(tabSizeValue)),
+          bracketCompartment.current.of(
+            settings.settings.editor.match_brackets ? bracketMatching() : [],
+          ),
+          highlightActiveLineGutter(),
+          highlightSpecialChars(),
+          history(),
+          drawSelection(),
+          dropCursor(),
+          EditorState.allowMultipleSelections.of(true),
+          indentOnInput(),
+          indentUnit.of(" ".repeat(tabSizeValue)),
+          highlightActiveLine(),
+          highlightSelectionMatches(),
+          closeBrackets(),
+          autocompletion({
+            override: [snippetSource],
+            activateOnTyping: true,
+            icons: false,
+          }),
+          markdown({ base: markdownLanguage, addKeymap: true }),
+          placeholder("Start writing markdown..."),
+          keymap.of([
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...historyKeymap,
+            ...foldKeymap,
+            indentWithTab,
+          ]),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const id = useStore.getState().activeId;
+              if (id) {
+                useStore.getState().markModified(id);
+                editorBus.emit(id, update.state.doc);
+              }
+            }
+            if (update.docChanged || update.selectionSet) {
+              publishStatus(update.view);
+            }
+          }),
+          EditorView.domEventHandlers({
+            paste: (event) => {
+              if (!hasClipboardImage(event)) return false;
+              event.preventDefault();
+              void handleImagePaste(event);
+              return true;
+            },
+          }),
+        ],
+      });
+    },
+    [publishStatus],
+  );
+
+  const applyCompartments = useCallback((view: EditorView) => {
+    const state = useStore.getState();
+    view.dispatch({
+      effects: [
+        themeCompartment.current.reconfigure(htmlToEditorTheme(state.theme)),
+        lineNumberCompartment.current.reconfigure(
+          state.settings.appearance.show_line_numbers !== false
+            ? lineNumbers()
+            : [],
+        ),
+        wrapCompartment.current.reconfigure(
+          state.settings.editor.word_wrap ? EditorView.lineWrapping : [],
+        ),
+        tabSizeCompartment.current.reconfigure(
+          EditorState.tabSize.of(state.settings.editor.tab_size || 4),
+        ),
+        bracketCompartment.current.reconfigure(
+          state.settings.editor.match_brackets ? bracketMatching() : [],
+        ),
+      ],
+    });
+  }, []);
+
+  const rememberState = useCallback((id: string, state: EditorState) => {
+    const cache = stateCache.current;
+    cache.delete(id);
+    if (state.doc.length * 2 <= EDITOR_STATE_CACHE.maxDocumentBytes) {
+      cache.set(id, state);
+    }
+    let total = 0;
+    for (const cached of cache.values()) total += cached.doc.length * 2;
+    while (
+      cache.size > EDITOR_STATE_CACHE.maxStates ||
+      (total > EDITOR_STATE_CACHE.maxBytes && cache.size > 1)
+    ) {
+      const victim = [...cache.keys()].find(
+        (key) => key !== currentTabRef.current && key !== id,
+      );
+      if (!victim) break;
+      total -= (cache.get(victim)?.doc.length ?? 0) * 2;
+      cache.delete(victim);
+    }
+  }, []);
+
+  const pruneCache = useCallback((order: string[]) => {
+    const live = new Set(order);
+    for (const id of [...stateCache.current.keys()]) {
+      if (!live.has(id)) stateCache.current.delete(id);
+    }
+  }, []);
+
+  // Create the editor once. Per-tab EditorState objects keep history isolated.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    const bootSettings = useStore.getState();
-    const state = EditorState.create({
-      doc: "",
-      extensions: [
-        themeCompartment.current.of(htmlToEditorTheme(bootSettings.theme)),
-        lineNumberCompartment.current.of(lineNumbers()),
-        wrapCompartment.current.of(EditorView.lineWrapping),
-        tabSizeCompartment.current.of(
-          EditorState.tabSize.of(bootSettings.settings.editor.tab_size || 4),
-        ),
-        bracketCompartment.current.of(bracketMatching()),
-        highlightActiveLineGutter(),
-        highlightSpecialChars(),
-        history(),
-        drawSelection(),
-        dropCursor(),
-        EditorState.allowMultipleSelections.of(true),
-        indentOnInput(),
-        indentUnit.of(" ".repeat(bootSettings.settings.editor.tab_size || 4)),
-        highlightActiveLine(),
-        highlightSelectionMatches(),
-        closeBrackets(),
-        autocompletion({
-          override: [snippetSource],
-          activateOnTyping: true,
-          icons: false,
-        }),
-        markdown({ base: markdownLanguage, addKeymap: true }),
-        placeholder("Start writing markdown..."),
-        keymap.of([
-          ...closeBracketsKeymap,
-          ...defaultKeymap,
-          ...historyKeymap,
-          ...foldKeymap,
-          indentWithTab,
-        ]),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged && !silent.current) {
-            const id = useStore.getState().activeId;
-            if (id) {
-              useStore.getState().markModified(id);
-              editorBus.emit(id, update.state.doc.toString());
-            }
-          }
-          if (update.docChanged || update.selectionSet) {
-            publishStatus(update.view);
-          }
-        }),
-        EditorView.domEventHandlers({
-          paste: (event) => {
-            if (!hasClipboardImage(event)) return false;
-            event.preventDefault();
-            void handleImagePaste(event);
-            return true;
-          },
-        }),
-      ],
-    });
-
-    const view = new EditorView({ state, parent: host });
+    const empty = createState("", 0);
+    const view = new EditorView({ state: empty, parent: host });
     editorRef.view = view;
     registerEditorScroller(view.scrollDOM);
 
     editorRef.setDoc = (content: string) => {
-      silent.current = true;
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: content },
-      });
-      silent.current = false;
-      publishStatus(view);
+      const store = useStore.getState();
+      const id = store.activeId;
+      if (!id || currentTabRef.current !== id) return;
+      const cursor = Math.min(view.state.selection.main.head, content.length);
+      const next = createState(content, cursor);
+      rememberState(id, next);
+      currentTabRef.current = id;
+      view.setState(next);
+      useStore.setState({ editorTabId: id });
+      publishStatus(view, true);
     };
 
     editorRef.restore = (cursor: number, scrollTop: number) => {
-      silent.current = true;
       const max = view.state.doc.length;
       const anchor = Math.max(0, Math.min(cursor, max));
       view.dispatch({ selection: { anchor } });
-      silent.current = false;
       view.scrollDOM.scrollTop = scrollTop;
+      publishStatus(view, true);
     };
 
     editorRef.getCursor = () => view.state.selection.main.head;
@@ -195,70 +308,124 @@ export function EditorPane() {
     const store = useStore.getState();
     const initial = store.activeId ? store.tabs[store.activeId] : null;
     if (initial) {
-      editorRef.setDoc?.(initial.content);
-      editorRef.restore?.(initial.cursorPos, initial.scrollTop);
+      const state = createState(initial.content, initial.cursorPos);
+      rememberState(initial.id, state);
+      currentTabRef.current = initial.id;
+      view.setState(state);
+      view.scrollDOM.scrollTop = initial.scrollTop;
       useStore.setState({ editorTabId: initial.id });
     }
+    publishStatus(view, true);
     view.focus();
 
     return () => {
+      if (statusFrame.current !== undefined) {
+        window.cancelAnimationFrame(statusFrame.current);
+        statusFrame.current = undefined;
+      }
+      if (statusTimer.current !== undefined) {
+        window.clearTimeout(statusTimer.current);
+        statusTimer.current = undefined;
+      }
       registerEditorScroller(null);
       editorRef.view = null;
       editorRef.setDoc = undefined;
+      editorRef.restore = undefined;
+      editorRef.getCursor = undefined;
+      editorRef.getScroll = undefined;
+      editorRef.focus = undefined;
+      editorRef.scrollToLine = undefined;
+      editorRef.insertText = undefined;
+      currentTabRef.current = null;
+      stateCache.current.clear();
       useStore.setState({ editorTabId: null });
       view.destroy();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [createState, publishStatus, rememberState]);
 
-  // Load tab content when the active tab changes.
+  // Load the active tab's cached state (or create it) when tabs change.
   useEffect(() => {
     const view = editorRef.view;
     if (!view) return;
-    const state = useStore.getState();
-    const tab = state.activeId ? state.tabs[state.activeId] : null;
-    silent.current = true;
-    view.dispatch({
-      changes: {
-        from: 0,
-        to: view.state.doc.length,
-        insert: tab?.content ?? "",
-      },
-      selection: {
-        anchor: Math.min(tab?.cursorPos ?? 0, tab?.content.length ?? 0),
-      },
-    });
-    silent.current = false;
-    view.scrollDOM.scrollTop = tab?.scrollTop ?? 0;
-    useStore.setState({ editorTabId: tab?.id ?? null });
-    if (tab) view.focus();
-    publishStatus(view);
-  }, [activeId, publishStatus]);
+    const store = useStore.getState();
+
+    const id = store.activeId;
+    if (!id) {
+      pruneCache(store.order);
+      if (currentTabRef.current !== null) {
+        currentTabRef.current = null;
+        view.setState(createState("", 0));
+        useStore.setState({ editorTabId: null });
+        publishStatus(view, true);
+      }
+      return;
+    }
+
+    const tab = store.tabs[id];
+    if (!tab) return;
+
+    // The view already holds this tab. This happens when only `active`
+    // changes (WRITE ↔ SPLIT) or when settings reconfigured the state; the
+    // live state is authoritative, so never rebuild it from a stale snapshot.
+    if (currentTabRef.current === id) {
+      if (stateCache.current.get(id) !== view.state) {
+        rememberState(id, view.state);
+      }
+      return;
+    }
+
+    const cached = stateCache.current.get(id);
+    const previous = currentTabRef.current;
+    if (previous && previous !== id) {
+      rememberState(previous, view.state);
+    }
+    pruneCache(store.order);
+
+    // A tab changed on disk (or was reloaded) while inactive: drop its stale
+    // history-backed state and rebuild from the store.
+    const usable =
+      cached &&
+      cached.doc.length === tab.content.length &&
+      cached.doc.toString() === tab.content
+        ? cached
+        : undefined;
+    const next = usable ?? createState(tab.content, tab.cursorPos);
+    currentTabRef.current = id;
+    rememberState(id, next);
+    view.setState(next);
+    applyCompartments(view);
+    // Reconfiguration creates a fresh EditorState; keep the cache pointing at
+    // the live state so a later WRITE ↔ SPLIT toggle does not restore stale text.
+    rememberState(id, view.state);
+    view.scrollDOM.scrollTop = tab.scrollTop;
+    useStore.setState({ editorTabId: id });
+    publishStatus(view, true);
+    view.focus();
+  }, [
+    activeId,
+    applyCompartments,
+    createState,
+    pruneCache,
+    publishStatus,
+    rememberState,
+  ]);
 
   // React to appearance / editor settings.
   useEffect(() => {
     const view = editorRef.view;
     if (!view) return;
-    view.dispatch({
-      effects: [
-        themeCompartment.current.reconfigure(
-          theme === "dark" ? darkTheme : lightTheme,
-        ),
-        lineNumberCompartment.current.reconfigure(
-          showLineNumbers ? lineNumbers() : [],
-        ),
-        wrapCompartment.current.reconfigure(
-          wordWrap ? EditorView.lineWrapping : [],
-        ),
-        tabSizeCompartment.current.reconfigure(
-          EditorState.tabSize.of(tabSize || 4),
-        ),
-        bracketCompartment.current.reconfigure(
-          matchBrackets ? bracketMatching() : [],
-        ),
-      ],
-    });
-  }, [theme, showLineNumbers, wordWrap, tabSize, matchBrackets]);
+    applyCompartments(view);
+    const current = currentTabRef.current;
+    if (current) rememberState(current, view.state);
+  }, [
+    theme,
+    showLineNumbers,
+    wordWrap,
+    tabSize,
+    matchBrackets,
+    applyCompartments,
+    rememberState,
+  ]);
 
   useEffect(() => {
     document.documentElement.style.setProperty(

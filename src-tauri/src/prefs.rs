@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 pub fn default_settings() -> Value {
     json!({
@@ -46,7 +46,7 @@ pub fn default_settings() -> Value {
         },
         "session": {
             "restore_session": true,
-            "backup_interval": 5,
+            "backup_interval": 10,
             "remember_folder": true
         },
         "preview": {
@@ -201,12 +201,154 @@ impl SessionStore {
         self.backup_dir.join(format!("{safe}.md"))
     }
 
-    pub fn write_backup(&self, tab_id: &str, content: &str) {
-        let _ = std::fs::write(self.backup_path(tab_id), content);
+    pub fn write_backup(&self, tab_id: &str, content: &str) -> bool {
+        let path = self.backup_path(tab_id);
+        let tmp = path.with_extension("md.tmp");
+        if std::fs::write(&tmp, content).is_err() {
+            return false;
+        }
+        if std::fs::rename(&tmp, &path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            return false;
+        }
+        true
     }
 
     fn read_backup(&self, tab_id: &str) -> Option<String> {
         std::fs::read_to_string(self.backup_path(tab_id)).ok()
+    }
+
+    fn read_session_raw(&self) -> Option<Value> {
+        let raw = std::fs::read_to_string(&self.session_path).ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    /// Session v2: `content` is present only for tabs that changed since the
+    /// previous backup. Metadata is merged over the existing session so tabs
+    /// without content keep their previous backup on disk.
+    pub fn save_merged(&self, data: &Value) -> bool {
+        let payload_version = data.get("version").and_then(Value::as_u64);
+        if payload_version != Some(2) {
+            return self.save(data);
+        }
+
+        let Some(payload) = data.as_object() else {
+            return false;
+        };
+        let Some(payload_tabs) = payload.get("tabs").and_then(Value::as_object) else {
+            return false;
+        };
+
+        let existing = self.read_session_raw().unwrap_or_else(|| json!({}));
+        let old_tabs = existing
+            .get("tabs")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut merged_tabs = serde_json::Map::new();
+        let mut backups: Vec<(String, String)> = Vec::new();
+        for (tab_id, raw_tab) in payload_tabs {
+            let Some(raw_tab) = raw_tab.as_object() else {
+                continue;
+            };
+            let mut merged = old_tabs
+                .get(tab_id)
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            for (key, value) in raw_tab {
+                if key == "content" {
+                    if let Value::String(content) = value {
+                        merged.insert("content_len".into(), json!(content.len()));
+                        backups.push((tab_id.clone(), content.clone()));
+                    }
+                    continue;
+                }
+                merged.insert(key.clone(), value.clone());
+            }
+            merged_tabs.insert(tab_id.clone(), Value::Object(merged));
+        }
+
+        let mut session = existing;
+        let Some(session_obj) = session.as_object_mut() else {
+            return false;
+        };
+        let old_meta_hash = session_obj
+            .get("meta_hash")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let new_meta_hash = payload
+            .get("meta_hash")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        session_obj.insert("version".into(), json!(2));
+        session_obj.insert("tabs".into(), Value::Object(merged_tabs));
+        for key in [
+            "meta_hash",
+            "tab_order",
+            "active_tab",
+            "workspace_folder",
+            "sidebar_width",
+            "sidebar_collapsed",
+        ] {
+            if let Some(value) = payload.get(key) {
+                session_obj.insert(key.to_string(), value.clone());
+            }
+        }
+
+        if backups.is_empty() && old_meta_hash == new_meta_hash && new_meta_hash.is_some() {
+            return true;
+        }
+
+        for (tab_id, content) in &backups {
+            if !self.write_backup(tab_id, content) {
+                return false;
+            }
+        }
+
+        let Ok(text) = serde_json::to_string_pretty(&session) else {
+            return false;
+        };
+        let tmp = self.session_path.with_extension("json.tmp");
+        if std::fs::write(&tmp, text).is_err() {
+            return false;
+        }
+        if std::fs::rename(&tmp, &self.session_path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            return false;
+        }
+
+        // Only prune when there is at least one tab: an empty start-up save
+        // must not wipe crash backups before the session is restored.
+        let live_ids: std::collections::HashSet<String> = payload
+            .get("tab_order")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !live_ids.is_empty() {
+            if let Ok(entries) = std::fs::read_dir(&self.backup_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                        continue;
+                    }
+                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    if !live_ids.contains(stem) {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+            }
+        }
+        true
     }
 
     pub fn save(&self, data: &Value) -> bool {
@@ -276,15 +418,26 @@ impl SessionStore {
                 let Some(tab_obj) = tab.as_object_mut() else {
                     continue;
                 };
-                let content = self
-                    .read_backup(tab_id)
-                    .or_else(|| {
-                        tab_obj
-                            .get("path")
-                            .and_then(|p| p.as_str())
-                            .and_then(|p| std::fs::read_to_string(p).ok())
-                    })
-                    .unwrap_or_default();
+                let path = tab_obj
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let modified = tab_obj
+                    .get("modified")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let disk = || {
+                    path.as_deref()
+                        .and_then(|p| std::fs::read_to_string(p).ok())
+                };
+                let content = if modified {
+                    self.read_backup(tab_id).or_else(disk)
+                } else {
+                    // A clean tab should reflect external edits made while the
+                    // app was closed; the backup is only a fallback.
+                    disk().or_else(|| self.read_backup(tab_id))
+                }
+                .unwrap_or_default();
                 tab_obj.insert("content".to_string(), Value::String(content));
             }
         }
@@ -292,11 +445,133 @@ impl SessionStore {
     }
 }
 
-/// Convenience for building a settings patch object from typed helpers.
-pub fn patch_object(entries: impl IntoIterator<Item = (String, Value)>) -> Value {
-    let mut map = Map::new();
-    for (k, v) in entries {
-        map.insert(k, v);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::security::display_path;
+    use serde_json::json;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "markview-test-{tag}-{}-{stamp}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
     }
-    Value::Object(map)
+
+    fn tab(store: &SessionStore, id: &str) -> String {
+        std::fs::read_to_string(store.backup_path(id)).unwrap_or_default()
+    }
+
+    #[test]
+    fn session_v2_merges_backups_and_prunes_closed_tabs() {
+        let dir = temp_dir("session");
+        let store = SessionStore::new(&dir);
+
+        let first = json!({
+            "version": 2,
+            "meta_hash": "h1",
+            "tabs": {
+                "tab_1": { "path": null, "filename": "a", "modified": true, "content": "one" },
+                "tab_2": { "path": null, "filename": "b", "modified": true, "content": "two" }
+            },
+            "tab_order": ["tab_1", "tab_2"],
+            "active_tab": "tab_1",
+            "workspace_folder": null
+        });
+        assert!(store.save_merged(&first));
+        assert_eq!(tab(&store, "tab_1"), "one");
+        assert_eq!(tab(&store, "tab_2"), "two");
+
+        let second = json!({
+            "version": 2,
+            "meta_hash": "h2",
+            "tabs": {
+                "tab_1": { "path": null, "filename": "a", "modified": true, "content": "one+" },
+                "tab_2": { "path": null, "filename": "b", "modified": false }
+            },
+            "tab_order": ["tab_1", "tab_2"],
+            "active_tab": "tab_1",
+            "workspace_folder": null
+        });
+        assert!(store.save_merged(&second));
+        assert_eq!(tab(&store, "tab_1"), "one+");
+        assert_eq!(
+            tab(&store, "tab_2"),
+            "two",
+            "metadata-only save must keep backup"
+        );
+
+        let third = json!({
+            "version": 2,
+            "meta_hash": "h3",
+            "tabs": {
+                "tab_1": { "path": null, "filename": "a", "modified": false }
+            },
+            "tab_order": ["tab_1"],
+            "active_tab": "tab_1",
+            "workspace_folder": null
+        });
+        assert!(store.save_merged(&third));
+        assert!(!store.backup_path("tab_2").exists(), "closed tab pruned");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clean_tab_restores_from_disk() {
+        let dir = temp_dir("restore");
+        let store = SessionStore::new(&dir);
+        let file = dir.join("doc.md");
+        std::fs::write(&file, "disk").expect("write disk");
+
+        let payload = json!({
+            "version": 2,
+            "meta_hash": "h1",
+            "tabs": {
+                "tab_1": {
+                    "path": display_path(&file),
+                    "filename": "doc.md",
+                    "modified": false,
+                    "content": "backup"
+                }
+            },
+            "tab_order": ["tab_1"],
+            "active_tab": "tab_1",
+            "workspace_folder": null
+        });
+        assert!(store.save_merged(&payload));
+        std::fs::write(&file, "disk-new").expect("write disk 2");
+        let session = store.load().expect("session");
+        assert_eq!(
+            session["tabs"]["tab_1"]["content"].as_str(),
+            Some("disk-new")
+        );
+
+        let modified = json!({
+            "version": 2,
+            "meta_hash": "h2",
+            "tabs": {
+                "tab_1": {
+                    "path": display_path(&file),
+                    "filename": "doc.md",
+                    "modified": true,
+                    "content": "buffer"
+                }
+            },
+            "tab_order": ["tab_1"],
+            "active_tab": "tab_1",
+            "workspace_folder": null
+        });
+        assert!(store.save_merged(&modified));
+        std::fs::write(&file, "disk-newer").expect("write disk 3");
+        let session = store.load().expect("session");
+        assert_eq!(session["tabs"]["tab_1"]["content"].as_str(), Some("buffer"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

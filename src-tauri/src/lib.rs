@@ -163,6 +163,7 @@ pub fn run() {
             commands::save_image,
             commands::reveal_in_explorer,
             commands::search_in_files,
+            commands::cancel_search,
             commands::path_kind,
             commands::restore_workspace,
             commands::set_window_theme,

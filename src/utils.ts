@@ -28,6 +28,11 @@ export function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").toLowerCase();
 }
 
+/** CodeMirror stores lines as `\n`; keep the store in the same shape. */
+export function normalizeNewlines(value: string): string {
+  return value.replace(/\r\n?/g, "\n");
+}
+
 /** Resolve a relative URL against the directory containing `baseFile`. */
 export function resolveRelative(baseFile: string, rel: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(rel) || rel.startsWith("//")) {
@@ -38,7 +43,9 @@ export function resolveRelative(baseFile: string, rel: string): string {
   const baseDir = dirname(base);
   const target = rel.replace(/\\/g, "/").replace(/^[/\\]{2}\?[/\\]/, "");
   const isAbsolute = /^[a-zA-Z]:\//.test(target) || target.startsWith("/");
-  const parts = isAbsolute ? target.split("/") : `${baseDir}/${target}`.split("/");
+  const parts = isAbsolute
+    ? target.split("/")
+    : `${baseDir}/${target}`.split("/");
   const out: string[] = [];
   for (const part of parts) {
     if (!part || part === ".") continue;

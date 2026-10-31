@@ -1,6 +1,7 @@
 //! Markdown → sanitized HTML (comrak + ammonia).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 use serde_json::{json, Value};
 
@@ -49,7 +50,13 @@ const ALLOWED_TAGS: &[&str] = &[
 
 const GLOBAL_ATTRS: &[&str] = &["class", "title", "id"];
 
-fn builder() -> ammonia::Builder<'static> {
+static BUILDER: OnceLock<ammonia::Builder<'static>> = OnceLock::new();
+
+fn builder() -> &'static ammonia::Builder<'static> {
+    BUILDER.get_or_init(build_builder)
+}
+
+fn build_builder() -> ammonia::Builder<'static> {
     let tags: HashSet<&str> = ALLOWED_TAGS.iter().copied().collect();
 
     let mut tag_attributes: HashMap<&str, HashSet<&str>> = HashMap::new();

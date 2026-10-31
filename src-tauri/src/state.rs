@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 use crate::prefs::{SessionStore, SettingsStore};
@@ -18,6 +19,8 @@ pub struct AppState {
     pub watcher: Mutex<Option<WatcherHandle>>,
     /// File passed on the command line by Explorer / a file association.
     pub launch_file: Mutex<Option<PathBuf>>,
+    /// Latest search request id; older workers abort when it changes.
+    pub search_request: AtomicU64,
 }
 
 /// Mirrors the Python implementation: `%APPDATA%\MarkView`, so an existing
@@ -66,6 +69,7 @@ impl AppState {
             trusted_folders: Mutex::new(trusted_folders),
             watcher: Mutex::new(None),
             launch_file: Mutex::new(None),
+            search_request: AtomicU64::new(0),
         }
     }
 }

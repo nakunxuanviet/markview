@@ -188,7 +188,7 @@ export function App() {
     if (!ready) return;
     const seconds = Math.max(
       3,
-      Math.min(60, settings.session.backup_interval || 5),
+      Math.min(60, settings.session.backup_interval || 10),
     );
     const id = window.setInterval(() => {
       void useStore.getState().saveSession();
@@ -224,15 +224,23 @@ export function App() {
     };
   }, []);
 
-  // Save the session when the window goes away. Best effort only: the periodic
-  // backup is what guarantees durability.
+  // Save the session when the window goes away or is minimized. Best effort
+  // only: the periodic backup is what guarantees durability.
   useEffect(() => {
+    if (!ready) return;
     const handler = () => {
       void useStore.getState().saveSession();
     };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") handler();
+    };
     window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, []);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("beforeunload", handler);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [ready]);
 
   // Filesystem watcher events.
   useEffect(() => {
@@ -343,6 +351,12 @@ export function App() {
       }
 
       if (!ctrl) return;
+
+      if (key === "enter") {
+        consume();
+        window.dispatchEvent(new Event("markview:preview-update"));
+        return;
+      }
 
       if (key === "tab") {
         consume();
@@ -514,6 +528,7 @@ export function App() {
 
   const splitMode = viewMode === "split";
   const previewShown = !splitMode || previewVisible;
+  const previewActive = splitMode ? previewVisible : singleView === "preview";
 
   return (
     <>
@@ -540,7 +555,7 @@ export function App() {
                   title="Drag to resize"
                 />
               )}
-              <PreviewPane hidden={!previewShown} />
+              <PreviewPane hidden={!previewShown} active={previewActive} />
               <FindBar />
             </div>
           </div>

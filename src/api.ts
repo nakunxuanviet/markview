@@ -13,6 +13,7 @@ import type {
   RenderResult,
   SearchHit,
   SearchOptions,
+  SearchResponse,
   SessionData,
   TreeNode,
 } from "./types";
@@ -126,5 +127,13 @@ export const api = {
     query: string,
     folder: string | null,
     options: SearchOptions,
-  ) => invoke<SearchHit[]>("search_in_files", { query, folder, options }),
+    requestId: number,
+  ) =>
+    invoke<SearchResponse>("search_in_files", {
+      requestId,
+      query,
+      folder,
+      options,
+    }),
+  cancelSearch: () => invoke<void>("cancel_search"),
 };

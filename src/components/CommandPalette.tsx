@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { openFind, reloadAllFromDisk, saveActiveAs, compareWithSaved, compareWithFile } from "../actions";
+import {
+  openFind,
+  reloadAllFromDisk,
+  saveActiveAs,
+  compareWithSaved,
+  compareWithFile,
+} from "../actions";
 import { IconCommand } from "../icons";
 import { useStore } from "../store";
 
@@ -21,39 +27,86 @@ export function CommandPalette() {
     const setState = useStore.setState;
     return [
       { label: "New File", shortcut: "Ctrl+N", run: () => store.createTab() },
-      { label: "Open File...", shortcut: "Ctrl+O", run: () => store.openFileDialog() },
-      { label: "Open Folder...", shortcut: "Ctrl+Shift+O", run: () => store.openFolder() },
+      {
+        label: "Open File...",
+        shortcut: "Ctrl+O",
+        run: () => store.openFileDialog(),
+      },
+      {
+        label: "Open Folder...",
+        shortcut: "Ctrl+Shift+O",
+        run: () => store.openFolder(),
+      },
       { label: "Save", shortcut: "Ctrl+S", run: () => store.saveActive() },
       { label: "Save As...", shortcut: "Ctrl+Shift+S", run: saveActiveAs },
-      { label: "Close Tab", shortcut: "Ctrl+W", run: () => {
-        const id = useStore.getState().activeId;
-        if (id) void useStore.getState().closeTab(id);
-      } },
+      {
+        label: "Close Tab",
+        shortcut: "Ctrl+W",
+        run: () => {
+          const id = useStore.getState().activeId;
+          if (id) void useStore.getState().closeTab(id);
+        },
+      },
       { label: "Close All Tabs", run: () => store.closeAll() },
       { label: "Reload All Files from Disk", run: reloadAllFromDisk },
       { label: "Find", shortcut: "Ctrl+F", run: () => openFind(false) },
-      { label: "Find and Replace", shortcut: "Ctrl+H", run: () => openFind(true) },
-      { label: "Search in Files", shortcut: "Ctrl+Shift+F", run: () => setState({ searchFilesOpen: true }) },
-      { label: "Quick Open File", shortcut: "Ctrl+P", run: () => setState({ quickOpenOpen: true }) },
-      { label: "Toggle Sidebar", shortcut: "Ctrl+\\", run: () => store.toggleSidebar() },
-      { label: "Toggle Preview", shortcut: "Ctrl+Shift+V", run: () => store.togglePreview() },
+      {
+        label: "Find and Replace",
+        shortcut: "Ctrl+H",
+        run: () => openFind(true),
+      },
+      {
+        label: "Search in Files",
+        shortcut: "Ctrl+Shift+F",
+        run: () => setState({ searchFilesOpen: true }),
+      },
+      {
+        label: "Quick Open File",
+        shortcut: "Ctrl+P",
+        run: () => setState({ quickOpenOpen: true }),
+      },
+      {
+        label: "Toggle Sidebar",
+        shortcut: "Ctrl+\\",
+        run: () => store.toggleSidebar(),
+      },
+      {
+        label: "Toggle Preview",
+        shortcut: "Ctrl+Shift+V",
+        run: () => store.togglePreview(),
+      },
       { label: "Single View", run: () => store.setViewMode("single") },
       { label: "Split View", run: () => store.setViewMode("split") },
       { label: "Show Editor", run: () => store.showSingleView("editor") },
       { label: "Show Preview", run: () => store.showSingleView("preview") },
+      {
+        label: "Preview: Update Now",
+        shortcut: "Ctrl+Enter",
+        run: () => window.dispatchEvent(new Event("markview:preview-update")),
+      },
       { label: "Toggle Theme", run: () => store.toggleTheme() },
-      { label: "Toggle Zen Mode", shortcut: "F11", run: () => store.toggleZen() },
+      {
+        label: "Toggle Zen Mode",
+        shortcut: "F11",
+        run: () => store.toggleZen(),
+      },
       { label: "Compare with Saved", run: compareWithSaved },
       { label: "Compare with File...", run: compareWithFile },
       { label: "Reload Folder", run: () => store.refreshTree() },
-      { label: "Settings", shortcut: "Ctrl+,", run: () => setState({ settingsOpen: true }) },
+      {
+        label: "Settings",
+        shortcut: "Ctrl+,",
+        run: () => setState({ settingsOpen: true }),
+      },
     ];
   }, []);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return commands;
-    return commands.filter((command) => command.label.toLowerCase().includes(needle));
+    return commands.filter((command) =>
+      command.label.toLowerCase().includes(needle),
+    );
   }, [commands, query]);
 
   useEffect(() => {
@@ -94,7 +147,9 @@ export function CommandPalette() {
                 close();
               } else if (event.key === "ArrowDown") {
                 event.preventDefault();
-                setSelected((index) => Math.min(index + 1, filtered.length - 1));
+                setSelected((index) =>
+                  Math.min(index + 1, filtered.length - 1),
+                );
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
                 setSelected((index) => Math.max(index - 1, 0));
@@ -115,10 +170,14 @@ export function CommandPalette() {
               onClick={() => execute(command)}
             >
               <span className="cp-label">{command.label}</span>
-              {command.shortcut && <span className="cp-shortcut">{command.shortcut}</span>}
+              {command.shortcut && (
+                <span className="cp-shortcut">{command.shortcut}</span>
+              )}
             </div>
           ))}
-          {filtered.length === 0 && <div className="sif-empty">No commands</div>}
+          {filtered.length === 0 && (
+            <div className="sif-empty">No commands</div>
+          )}
         </div>
         <div className="dialog-hint">
           <span>↑↓ navigate</span>

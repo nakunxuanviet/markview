@@ -15,10 +15,48 @@ import type {
   TreeNode,
   ViewMode,
 } from "./types";
-import { basename, normalizePath, parseHeadings } from "./utils";
+import {
+  basename,
+  normalizeNewlines,
+  normalizePath,
+  parseHeadings,
+} from "./utils";
 
 let tabSeq = 0;
 const nextId = () => `tab_${Date.now()}_${++tabSeq}`;
+
+/** Content revisions live outside the store so typing never re-renders it. */
+const tabRevisions = new Map<string, number>();
+const backedUpRevisions = new Map<string, number>();
+let lastSavedMetaHash = "";
+let sessionSaving = false;
+
+function hashString(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function sessionMetaHash(state: {
+  order: string[];
+  activeId: string | null;
+  workspace: string | null;
+  sidebarWidth: number;
+  sidebarVisible: boolean;
+}): string {
+  return hashString(
+    JSON.stringify({
+      order: state.order,
+      active: state.activeId,
+      workspace: state.workspace,
+      sidebarWidth: state.sidebarWidth,
+      sidebarVisible: state.sidebarVisible,
+    }),
+  );
+}
 
 export const DEFAULT_SETTINGS: AppSettings = {
   appearance: {
@@ -70,7 +108,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   session: {
     restore_session: true,
-    backup_interval: 5,
+    backup_interval: 10,
     remember_folder: true,
   },
   recent_files: [],
@@ -120,6 +158,12 @@ function findNode(nodes: TreeNode[], path: string): TreeNode | null {
     }
   }
   return null;
+}
+
+export interface SessionBuild {
+  payload: Record<string, unknown>;
+  dirtyIds: string[];
+  metaHash: string;
 }
 
 export interface AppStore {
@@ -173,6 +217,8 @@ export interface AppStore {
   saveTab: (id: string) => Promise<boolean>;
   saveActive: () => Promise<boolean>;
   markModified: (id: string) => void;
+  /** Bump the session revision without changing the modified flag. */
+  touchTab: (id: string) => void;
   snapshotActive: () => void;
   replaceTabContent: (id: string, content: string, markClean?: boolean) => void;
 
@@ -202,7 +248,7 @@ export interface AppStore {
   dismissBanner: (id: string) => void;
   reloadTab: (id: string) => Promise<void>;
 
-  buildSession: () => Record<string, unknown>;
+  buildSession: () => SessionBuild;
   saveSession: () => Promise<void>;
 }
 
@@ -279,7 +325,7 @@ export const useStore = create<AppStore>((set, get) => ({
               path: data.path ?? null,
               filename:
                 data.filename || (data.path ? basename(data.path) : "Untitled"),
-              content: data.content ?? "",
+              content: normalizeNewlines(data.content ?? ""),
               modified: data.modified ?? false,
               cursorPos: data.cursor_pos ?? 0,
               scrollTop: data.scroll_top ?? 0,
@@ -287,6 +333,8 @@ export const useStore = create<AppStore>((set, get) => ({
               encoding: "UTF-8",
             };
             order.push(id);
+            tabRevisions.set(id, 0);
+            backedUpRevisions.delete(id);
           }
 
           // Re-establish trust for the workspace and for files opened last
@@ -354,13 +402,15 @@ export const useStore = create<AppStore>((set, get) => ({
       id,
       path: opts.path ?? null,
       filename: opts.filename ?? "Untitled",
-      content: opts.content ?? "",
+      content: normalizeNewlines(opts.content ?? ""),
       modified: opts.modified ?? false,
       cursorPos: opts.cursorPos ?? 0,
       scrollTop: opts.scrollTop ?? 0,
       isPreview: opts.isPreview ?? false,
       encoding: opts.encoding ?? "UTF-8",
     };
+    tabRevisions.set(id, 0);
+    backedUpRevisions.delete(id);
     set((state) => ({
       tabs: { ...state.tabs, [id]: tab },
       order: [...state.order, id],
@@ -398,6 +448,8 @@ export const useStore = create<AppStore>((set, get) => ({
       }
     }
 
+    tabRevisions.delete(id);
+    backedUpRevisions.delete(id);
     set({
       tabs,
       order,
@@ -484,6 +536,7 @@ export const useStore = create<AppStore>((set, get) => ({
     try {
       const result = await api.saveFileAs(path, content);
       if (result?.success) {
+        get().touchTab(id);
         set((state) => ({
           tabs: {
             ...state.tabs,
@@ -518,10 +571,16 @@ export const useStore = create<AppStore>((set, get) => ({
 
   markModified: (id) => {
     const tab = get().tabs[id];
-    if (!tab || tab.modified) return;
+    if (!tab) return;
+    tabRevisions.set(id, (tabRevisions.get(id) ?? 0) + 1);
+    if (tab.modified) return;
     set((state) => ({
       tabs: { ...state.tabs, [id]: { ...state.tabs[id], modified: true } },
     }));
+  },
+
+  touchTab: (id) => {
+    tabRevisions.set(id, (tabRevisions.get(id) ?? 0) + 1);
   },
 
   snapshotActive: () => {
@@ -546,18 +605,20 @@ export const useStore = create<AppStore>((set, get) => ({
   replaceTabContent: (id, content, markClean = true) => {
     const tab = get().tabs[id];
     if (!tab) return;
+    const normalized = normalizeNewlines(content);
+    tabRevisions.set(id, (tabRevisions.get(id) ?? 0) + 1);
     set((state) => ({
       tabs: {
         ...state.tabs,
         [id]: {
           ...state.tabs[id],
-          content,
+          content: normalized,
           modified: markClean ? false : tab.modified,
         },
       },
     }));
     if (get().activeId === id) {
-      editorRef.setDoc?.(content);
+      editorRef.setDoc?.(normalized);
     }
     get().refreshHeadings();
   },
@@ -590,7 +651,8 @@ export const useStore = create<AppStore>((set, get) => ({
     );
 
     if (existing) {
-      const content = data.content ?? existing.content;
+      const content = normalizeNewlines(data.content ?? existing.content);
+      tabRevisions.set(existing.id, (tabRevisions.get(existing.id) ?? 0) + 1);
       set((current) => ({
         tabs: {
           ...current.tabs,
@@ -858,16 +920,18 @@ export const useStore = create<AppStore>((set, get) => ({
   buildSession: () => {
     const state = get();
     const tabs: Record<string, unknown> = {};
+    const dirtyIds: string[] = [];
     for (const [id, tab] of Object.entries(state.tabs)) {
       // Only trust the live editor text when the view actually holds this tab;
       // during start-up (and after remounts) the view may still be empty.
       const hydrated =
         state.activeId === id && state.editorTabId === id && !!editorRef.view;
-      const content = hydrated ? currentEditorContent() : tab.content;
-      tabs[id] = {
+      const revision = tabRevisions.get(id) ?? 0;
+      const backedUp = backedUpRevisions.get(id) ?? -1;
+      const dirty = revision !== backedUp;
+      const entry: Record<string, unknown> = {
         path: tab.path,
         filename: tab.filename,
-        content,
         cursor_pos: hydrated
           ? (editorRef.view?.state.selection.main.head ?? tab.cursorPos)
           : tab.cursorPos,
@@ -876,22 +940,52 @@ export const useStore = create<AppStore>((set, get) => ({
           : tab.scrollTop,
         modified: tab.modified,
       };
+      if (dirty) {
+        entry.content = hydrated ? currentEditorContent() : tab.content;
+        dirtyIds.push(id);
+      }
+      tabs[id] = entry;
     }
+
+    const metaHash = sessionMetaHash(state);
     return {
-      tabs,
-      tab_order: state.order,
-      active_tab: state.activeId,
-      workspace_folder: state.workspace,
-      sidebar_width: state.sidebarWidth,
-      sidebar_collapsed: !state.sidebarVisible,
+      payload: {
+        version: 2,
+        meta_hash: metaHash,
+        tabs,
+        tab_order: state.order,
+        active_tab: state.activeId,
+        workspace_folder: state.workspace,
+        sidebar_width: state.sidebarWidth,
+        sidebar_collapsed: !state.sidebarVisible,
+      },
+      dirtyIds,
+      metaHash,
     };
   },
 
   saveSession: async () => {
+    if (sessionSaving) return;
+    const { payload, dirtyIds, metaHash } = get().buildSession();
+    if (dirtyIds.length === 0 && metaHash === lastSavedMetaHash) return;
+
+    const revisions = new Map<string, number>();
+    for (const id of dirtyIds) {
+      revisions.set(id, tabRevisions.get(id) ?? 0);
+    }
+
+    sessionSaving = true;
     try {
-      await api.saveSession(get().buildSession());
+      const ok = await api.saveSession(payload);
+      if (!ok) return;
+      for (const [id, revision] of revisions) {
+        backedUpRevisions.set(id, revision);
+      }
+      lastSavedMetaHash = metaHash;
     } catch (error) {
       console.error("Failed to save session", error);
+    } finally {
+      sessionSaving = false;
     }
   },
 }));

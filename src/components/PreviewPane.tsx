@@ -2,15 +2,30 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Text as CodeMirrorText } from "@codemirror/state";
 import hljs from "../highlight";
 import katex from "katex";
 
 import { api } from "../api";
 import { editorBus } from "../editorBus";
 import { editorRef } from "../editorRef";
+import {
+  cacheBytes,
+  highlightCache,
+  mathCache,
+  mermaidCache,
+  previewCacheKey,
+} from "../previewCache";
+import {
+  PREVIEW_DEBOUNCE,
+  PREVIEW_MERMAID_DELAY,
+  PREVIEW_MAX_WAIT,
+  previewTier,
+  type PreviewTier,
+} from "../previewConfig";
 import { registerPreviewScroller } from "../scrollSync";
 import { useStore } from "../store";
-import { resolveRelative } from "../utils";
+import { formatSize, resolveRelative } from "../utils";
 
 interface InlineEdit {
   top: number;
@@ -22,14 +37,44 @@ interface InlineEdit {
   endLine: number;
 }
 
-export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
+type RenderStatus = "live" | "updating" | "paused";
+
+let mermaidLoader: Promise<typeof import("mermaid").default> | null = null;
+
+function loadMermaid(): Promise<typeof import("mermaid").default> {
+  mermaidLoader ??= import("mermaid").then((module) => module.default);
+  return mermaidLoader;
+}
+
+export function PreviewPane({
+  hidden = false,
+  active = false,
+}: {
+  hidden?: boolean;
+  active?: boolean;
+}) {
   const panelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const htmlRef = useRef("");
   const sourceRef = useRef("");
+  const renderedTextRef = useRef("");
+  const latestDocRef = useRef<CodeMirrorText | null>(null);
   const renderSeq = useRef(0);
+  const renderingRef = useRef(false);
+  const pendingRef = useRef(false);
+  const activeRef = useRef(active);
+  const timerRef = useRef<number | undefined>(undefined);
+  const maxTimerRef = useRef<number | undefined>(undefined);
+  const tierRef = useRef<PreviewTier | null>(null);
+  const lastActiveIdRef = useRef<string | null>(null);
+  const scheduleRef = useRef<(doc: CodeMirrorText) => void>(() => undefined);
+
   const [html, setHtml] = useState("");
   const [inline, setInline] = useState<InlineEdit | null>(null);
+  const [renderStatus, setRenderStatus] = useState<RenderStatus>("live");
+  const [largeTier, setLargeTier] = useState<PreviewTier | null>(null);
+  const [largeBytes, setLargeBytes] = useState(0);
+  const largeBytesRef = useRef(0);
 
   const activeId = useStore((state) => state.activeId);
   const tabPath = useStore((state) =>
@@ -50,49 +95,252 @@ export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
     (state) => state.settings.appearance.font_size_preview,
   );
 
-  const renderMarkdown = useCallback(async (content: string) => {
-    sourceRef.current = content;
-    const seq = ++renderSeq.current;
-    if (!content.trim()) {
-      htmlRef.current = "";
-      setHtml("");
-      return;
+  const clearTimers = useCallback(() => {
+    if (timerRef.current !== undefined) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
     }
-    try {
-      const result = await api.renderMarkdown(content);
-      if (seq !== renderSeq.current) return;
-      htmlRef.current = result?.html ?? "";
-      setHtml(htmlRef.current);
-    } catch (error) {
-      console.error("render failed", error);
+    if (maxTimerRef.current !== undefined) {
+      window.clearTimeout(maxTimerRef.current);
+      maxTimerRef.current = undefined;
     }
   }, []);
 
-  // Initial render + active tab changes.
-  useEffect(() => {
-    const state = useStore.getState();
-    const tab = state.activeId ? state.tabs[state.activeId] : null;
-    void renderMarkdown(tab?.content ?? "");
-  }, [activeId, renderMarkdown]);
+  const runRender = useCallback(async () => {
+    if (!activeRef.current) return;
+    clearTimers();
+    tierRef.current = null;
+    if (renderingRef.current) {
+      pendingRef.current = true;
+      return;
+    }
+    const doc = latestDocRef.current;
+    if (!doc) return;
 
-  // Debounced re-render while typing.
+    const text = doc.toString();
+    if (text === renderedTextRef.current) {
+      pendingRef.current = false;
+      setRenderStatus(previewTier(text.length) === "huge" ? "paused" : "live");
+      return;
+    }
+
+    renderingRef.current = true;
+    const seq = ++renderSeq.current;
+    setRenderStatus("updating");
+    try {
+      const result = await api.renderMarkdown(text);
+      if (seq !== renderSeq.current || !activeRef.current) return;
+      renderedTextRef.current = text;
+      sourceRef.current = text;
+      htmlRef.current = result?.html ?? "";
+      setHtml(htmlRef.current);
+      setRenderStatus(previewTier(text.length) === "huge" ? "paused" : "live");
+    } catch (error) {
+      console.error("render failed", error);
+      setRenderStatus("paused");
+    } finally {
+      renderingRef.current = false;
+      const changed = latestDocRef.current !== doc;
+      pendingRef.current = changed;
+      if (changed && activeRef.current && latestDocRef.current) {
+        scheduleRef.current(latestDocRef.current);
+      }
+    }
+  }, [clearTimers]);
+
+  const schedule = useCallback(
+    (doc: CodeMirrorText) => {
+      const tier = previewTier(doc.length);
+      setLargeTier(tier === "idle" || tier === "huge" ? tier : null);
+      if (
+        (tier === "idle" || tier === "huge") &&
+        Math.abs(doc.length - largeBytesRef.current) >= 2048
+      ) {
+        largeBytesRef.current = doc.length;
+        setLargeBytes(doc.length);
+      }
+
+      if (!activeRef.current) {
+        pendingRef.current = true;
+        return;
+      }
+
+      if (tier === "huge") {
+        // Manual only. Entering this tier drops any previous preview DOM so a
+        // 16 MB document does not keep making every keystroke expensive.
+        clearTimers();
+        if (tierRef.current !== "huge" && htmlRef.current) {
+          htmlRef.current = "";
+          renderedTextRef.current = "";
+          sourceRef.current = "";
+          setHtml("");
+        }
+        tierRef.current = tier;
+        pendingRef.current = true;
+        setRenderStatus("paused");
+        return;
+      }
+
+      if (tierRef.current !== tier) {
+        clearTimers();
+        tierRef.current = tier;
+      } else if (timerRef.current !== undefined) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = undefined;
+      }
+
+      const delay =
+        tier === "normal"
+          ? PREVIEW_DEBOUNCE.normal
+          : tier === "large"
+            ? PREVIEW_DEBOUNCE.large
+            : PREVIEW_DEBOUNCE.idle;
+      const maxWait =
+        tier === "normal"
+          ? PREVIEW_MAX_WAIT.normal
+          : tier === "large"
+            ? PREVIEW_MAX_WAIT.large
+            : PREVIEW_MAX_WAIT.idle;
+
+      setRenderStatus("updating");
+      timerRef.current = window.setTimeout(() => void runRender(), delay);
+      // maxWait is measured from the first pending keystroke, not reset on
+      // every key. Without this the preview only updates when typing stops.
+      if (maxWait > 0 && maxTimerRef.current === undefined) {
+        maxTimerRef.current = window.setTimeout(
+          () => void runRender(),
+          maxWait,
+        );
+      }
+    },
+    [clearTimers, runRender],
+  );
+
+  scheduleRef.current = schedule;
+
+  const forceRender = useCallback(() => {
+    if (!activeRef.current) return;
+    clearTimers();
+    void runRender();
+  }, [clearTimers, runRender]);
+
+  const docForActiveTab = useCallback((): CodeMirrorText | null => {
+    const state = useStore.getState();
+    const id = state.activeId;
+    if (!id) return null;
+    if (state.editorTabId === id && editorRef.view) {
+      return editorRef.view.state.doc;
+    }
+    const tab = state.tabs[id];
+    if (!tab) return null;
+    return CodeMirrorText.of(tab.content.split(/\r\n?|\n/));
+  }, []);
+
+  // Active tab changes: render the tab that is actually visible.
   useEffect(() => {
-    let timer: number | undefined;
-    const unsubscribe = editorBus.on((tabId, content) => {
+    renderSeq.current += 1;
+    const doc = docForActiveTab();
+    latestDocRef.current = doc;
+    pendingRef.current = true;
+    setInline(null);
+    if (!active || !doc) return;
+
+    const tabChanged = lastActiveIdRef.current !== activeId;
+    lastActiveIdRef.current = activeId;
+    const tier = previewTier(doc.length);
+    setLargeTier(tier === "idle" || tier === "huge" ? tier : null);
+    if (tier === "idle" || tier === "huge") {
+      largeBytesRef.current = doc.length;
+      setLargeBytes(doc.length);
+    }
+    // Huge documents are not rendered automatically: a 16 MB preview DOM
+    // makes typing in the editor unusable. The notice offers a manual render.
+    if (tier === "huge") {
+      if (tabChanged) {
+        htmlRef.current = "";
+        renderedTextRef.current = "";
+        sourceRef.current = "";
+        setHtml("");
+      }
+      setRenderStatus("paused");
+      return;
+    }
+    // Tab switches should feel immediate, not wait for the typing debounce.
+    forceRender();
+  }, [activeId, active, docForActiveTab, forceRender]);
+
+  // Preview showed/hidden (WRITE/READ/SPLIT).
+  useEffect(() => {
+    activeRef.current = active;
+    if (!active) {
+      clearTimers();
+      renderSeq.current += 1;
+      if (latestDocRef.current) pendingRef.current = true;
+      // A rendered 5 MB document is a ~16 MB DOM; release it when the pane
+      // is hidden instead of keeping it alive for the whole session.
+      if (
+        latestDocRef.current &&
+        previewTier(latestDocRef.current.length) === "huge"
+      ) {
+        htmlRef.current = "";
+        renderedTextRef.current = "";
+        sourceRef.current = "";
+        setHtml("");
+      }
+      return;
+    }
+    if (pendingRef.current) {
+      const doc = latestDocRef.current;
+      if (doc && previewTier(doc.length) === "huge") {
+        setRenderStatus("paused");
+      } else {
+        forceRender();
+      }
+    }
+  }, [active, clearTimers, forceRender]);
+
+  // Typing stream: keep the latest document only; no stringify until render.
+  useEffect(() => {
+    const unsubscribe = editorBus.on((tabId, doc) => {
       if (tabId !== useStore.getState().activeId) return;
-      sourceRef.current = content;
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => void renderMarkdown(content), 160);
+      latestDocRef.current = doc;
+      pendingRef.current = true;
+      if (!activeRef.current) return;
+      schedule(doc);
     });
     return () => {
-      if (timer) window.clearTimeout(timer);
       unsubscribe();
+      clearTimers();
     };
-  }, [renderMarkdown]);
+  }, [clearTimers, schedule]);
 
-  // Mermaid bakes theme colors into its SVG, so the content node is keyed by
-  // theme: a switch remounts the markup and the post-processing effect below
-  // renders the diagrams again with the new palette.
+  // The preview pane is hidden and the window is minimized: stop work.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        clearTimers();
+        if (latestDocRef.current) pendingRef.current = true;
+        return;
+      }
+      if (!activeRef.current || !pendingRef.current) return;
+      const doc = latestDocRef.current;
+      if (doc && previewTier(doc.length) === "huge") {
+        setRenderStatus("paused");
+      } else {
+        forceRender();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [clearTimers, forceRender]);
+
+  // Manual refresh (Ctrl+Enter, palette, button).
+  useEffect(() => {
+    const onRequest = () => forceRender();
+    window.addEventListener("markview:preview-update", onRequest);
+    return () =>
+      window.removeEventListener("markview:preview-update", onRequest);
+  }, [forceRender]);
 
   // Register the scroll pane for two-way scroll sync.
   useEffect(() => {
@@ -100,19 +348,14 @@ export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
     return () => registerPreviewScroller(null);
   }, []);
 
-  // Post-process the injected HTML.
+  // Post-process the injected HTML. Skipped entirely while the pane is hidden.
   useEffect(() => {
+    if (!active) return;
     const root = contentRef.current;
     if (!root) return;
+    if (!html) return;
 
-    root.querySelectorAll<HTMLElement>("pre code").forEach((block) => {
-      if (block.classList.contains("language-mermaid")) return;
-      try {
-        hljs.highlightElement(block);
-      } catch {
-        /* ignore unknown languages */
-      }
-    });
+    highlightCode(root);
     addCopyButtons(root);
 
     if (renderMathOn) {
@@ -122,23 +365,117 @@ export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
     processCheckboxes(root);
     processLinks(root);
     if (tabPath) processImages(root, tabPath);
-
-    let cancelled = false;
-    if (renderMermaidOn) {
-      void renderMermaid(root, theme, () => cancelled);
-    }
-    return () => {
-      cancelled = true;
-    };
   }, [
     html,
+    active,
     theme,
     tabPath,
     renderMathOn,
-    renderMermaidOn,
     previewFont,
     previewFontSize,
   ]);
+
+  // Mermaid is deferred and cached; it is the most expensive post-process.
+  useEffect(() => {
+    if (!active || !renderMermaidOn) return;
+    const root = contentRef.current;
+    if (!root) return;
+
+    const blocks = root.querySelectorAll<HTMLElement>(
+      "pre code.language-mermaid",
+    );
+    if (blocks.length === 0) return;
+
+    const rootStyle = getComputedStyle(root);
+    const font = rootStyle.fontFamily || "";
+    const fontSize = rootStyle.fontSize || "";
+    const targets: { container: HTMLElement; code: string; key: string }[] = [];
+    blocks.forEach((block, index) => {
+      const pre = block.parentElement;
+      if (!pre) return;
+      const container = document.createElement("div");
+      container.className = "mermaid-diagram mermaid-pending";
+      container.id = `mermaid-${Date.now()}-${index}`;
+      container.textContent = "Diagram · updating…";
+      pre.replaceWith(container);
+      const code = block.textContent ?? "";
+      const source = `${theme}\u0000${font}\u0000${fontSize}\u0000${code}`;
+      targets.push({
+        container,
+        code,
+        key: previewCacheKey("mermaid", source),
+      });
+    });
+    if (targets.length === 0) return;
+
+    let cancelled = false;
+    const tier = previewTier(sourceRef.current.length);
+    const delay =
+      tier === "normal"
+        ? PREVIEW_MERMAID_DELAY.normal
+        : tier === "large"
+          ? PREVIEW_MERMAID_DELAY.large
+          : PREVIEW_MERMAID_DELAY.idle;
+
+    const paintCached = () => {
+      let missing = false;
+      for (const target of targets) {
+        const source = `${theme}\u0000${font}\u0000${fontSize}\u0000${target.code}`;
+        const cached = mermaidCache.get(target.key, source);
+        if (cached === undefined) {
+          missing = true;
+          continue;
+        }
+        target.container.innerHTML = cached;
+        target.container.classList.remove("mermaid-pending");
+      }
+      return missing;
+    };
+
+    if (!paintCached()) return;
+
+    const timer = window.setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        const mermaid = await loadMermaid();
+        if (cancelled) return;
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          ...mermaidTheme(theme, root),
+        });
+        for (const [index, target] of targets.entries()) {
+          if (cancelled) return;
+          if (!target.container.classList.contains("mermaid-pending")) continue;
+          const source = `${theme}\u0000${font}\u0000${fontSize}\u0000${target.code}`;
+          const { svg } = await mermaid.render(
+            `markview-mermaid-${Date.now()}-${index}`,
+            target.code,
+          );
+          if (cancelled) return;
+          target.container.innerHTML = svg;
+          target.container.classList.remove("mermaid-pending");
+          mermaidCache.set(target.key, source, svg, cacheBytes(svg));
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const message =
+          error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
+        console.warn("mermaid render failed", error);
+        targets.forEach(({ container }) => {
+          container.classList.remove("mermaid-pending");
+          container.textContent = `mermaid error: ${message}`;
+        });
+      }
+    }, delay);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [html, active, theme, previewFont, previewFontSize, renderMermaidOn]);
 
   const onDoubleClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -170,11 +507,11 @@ export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
 
   const commitInline = useCallback(
     (value: string) => {
-      if (!inline || !editorRef.view) {
+      const view = editorRef.view;
+      if (!inline || !view) {
         setInline(null);
         return;
       }
-      const view = editorRef.view;
       try {
         const from = view.state.doc.line(inline.startLine + 1).from;
         const to = view.state.doc.line(inline.endLine + 1).to;
@@ -183,22 +520,62 @@ export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
         /* line range changed underneath us */
       }
       setInline(null);
-      void renderMarkdown(editorRef.view.state.doc.toString());
+      window.dispatchEvent(new Event("markview:preview-update"));
     },
-    [inline, renderMarkdown],
+    [inline],
   );
+
+  const statusLabel =
+    renderStatus === "updating"
+      ? "Updating"
+      : renderStatus === "paused"
+        ? "Paused"
+        : "Live";
+  const statusClass =
+    renderStatus === "updating"
+      ? " live-badge waiting"
+      : renderStatus === "paused"
+        ? " live-badge paused"
+        : " live-badge";
 
   return (
     <div id="preview-panel" className={hidden ? "hidden" : ""} ref={panelRef}>
       <div className="pane-bar preview-bar">
         <span className="pane-title">Preview</span>
-        <span className="live-badge">
+        <span className={statusClass.trim()}>
           <i />
-          Live
+          {statusLabel}
         </span>
         <div className="bar-spacer" />
         <span className="bar-label">Markdown</span>
       </div>
+      {largeTier && (
+        <div className="preview-notice">
+          <svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          >
+            <path d="M12 9v4M12 17h.01" />
+            <path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+          </svg>
+          <span>
+            {largeTier === "huge"
+              ? "Preview disabled for very large documents"
+              : "Large document — preview updates after you pause"}
+            <span className="preview-notice-size">
+              {formatSize(largeBytes)}
+            </span>
+          </span>
+          <button type="button" onClick={forceRender}>
+            {largeTier === "huge" ? "Render preview" : "Update preview"}
+          </button>
+        </div>
+      )}
       <div
         id="preview-content"
         key={`${theme}:${previewFont}:${previewFontSize}`}
@@ -211,7 +588,9 @@ export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
         dangerouslySetInnerHTML={{
           __html:
             html ||
-            '<p style="color:var(--text-muted)">Preview will appear here...</p>',
+            (largeTier === "huge"
+              ? '<p style="color:var(--text-muted)">Preview is disabled for this large document. Use “Render preview” to build it once.</p>'
+              : '<p style="color:var(--text-muted)">Preview will appear here...</p>'),
         }}
       />
       {inline && (
@@ -251,6 +630,36 @@ export function PreviewPane({ hidden = false }: { hidden?: boolean }) {
   );
 }
 
+function highlightCode(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>("pre code").forEach((block) => {
+    if (block.classList.contains("language-mermaid")) return;
+    if (block.dataset.hljs === "1") return;
+
+    const language =
+      Array.from(block.classList)
+        .find((name) => name.startsWith("language-"))
+        ?.slice("language-".length) ?? "plaintext";
+    const source = block.textContent ?? "";
+    const key = previewCacheKey("hljs", `${language}\u0000${source}`);
+    let highlighted = highlightCache.get(key, source);
+    if (highlighted === undefined) {
+      const resolved = hljs.getLanguage(language) ? language : "plaintext";
+      try {
+        highlighted = hljs.highlight(source, {
+          language: resolved,
+          ignoreIllegals: true,
+        }).value;
+      } catch {
+        highlighted = hljs.highlight(source, { language: "plaintext" }).value;
+      }
+      highlightCache.set(key, source, highlighted, cacheBytes(highlighted));
+    }
+    block.innerHTML = highlighted;
+    block.dataset.hljs = "1";
+    block.classList.add("hljs");
+  });
+}
+
 function processCheckboxes(root: HTMLElement) {
   root.querySelectorAll<HTMLLIElement>("li").forEach((li) => {
     if (li.querySelector('input[type="checkbox"]')) {
@@ -278,6 +687,8 @@ function processLinks(root: HTMLElement) {
 
 function processImages(root: HTMLElement, tabPath: string) {
   root.querySelectorAll<HTMLImageElement>("img[src]").forEach((img) => {
+    img.loading = "lazy";
+    img.decoding = "async";
     const src = img.getAttribute("src") ?? "";
     if (!src || /^(https?:|data:|blob:|markview:|asset:)/i.test(src)) return;
     const absolute = resolveRelative(tabPath, src);
@@ -367,6 +778,24 @@ function handleCopyClick(event: ReactMouseEvent<HTMLDivElement>): boolean {
   return true;
 }
 
+function mathHtml(tex: string, display: boolean): string {
+  const source = `${display ? "D" : "I"}\u0000${tex}`;
+  const key = previewCacheKey("math", source);
+  const cached = mathCache.get(key, source);
+  if (cached !== undefined) return cached;
+  let html: string;
+  try {
+    html = katex.renderToString(tex, {
+      displayMode: display,
+      throwOnError: false,
+    });
+  } catch {
+    html = `<span class="katex-error">${tex}</span>`;
+  }
+  mathCache.set(key, source, html, cacheBytes(html));
+  return html;
+}
+
 /**
  * Display math written across several lines (`$$\n…\n$$`) is split into
  * separate text nodes by the hard-break renderer, so handle whole paragraphs
@@ -378,14 +807,7 @@ function renderBlockMath(root: HTMLElement) {
     const match = text.match(/^\s*\$\$([\s\S]+?)\$\$\s*$/);
     if (!match) return;
     const span = document.createElement("span");
-    try {
-      katex.render(match[1].trim(), span, {
-        displayMode: true,
-        throwOnError: false,
-      });
-    } catch {
-      return;
-    }
+    span.innerHTML = mathHtml(match[1].trim(), true);
     paragraph.replaceWith(span);
   });
 }
@@ -433,12 +855,7 @@ function renderMath(root: HTMLElement) {
       const display = match[1] !== undefined;
       const tex = (display ? match[1] : match[2]).trim();
       const span = document.createElement("span");
-      try {
-        katex.render(tex, span, { displayMode: display, throwOnError: false });
-      } catch {
-        span.className = "katex-error";
-        span.textContent = tex;
-      }
+      span.innerHTML = mathHtml(tex, display);
       fragment.appendChild(span);
       lastIndex = match.index + match[0].length;
     }
@@ -533,57 +950,6 @@ function mermaidTheme(theme: string, root: HTMLElement) {
       attributeBackgroundColorEven: surface,
     },
   };
-}
-
-async function renderMermaid(
-  root: HTMLElement,
-  theme: string,
-  isCancelled: () => boolean,
-) {
-  const blocks = root.querySelectorAll<HTMLElement>(
-    "pre code.language-mermaid",
-  );
-  if (blocks.length === 0) return;
-
-  const targets: { container: HTMLElement; code: string }[] = [];
-  blocks.forEach((block, index) => {
-    const pre = block.parentElement;
-    if (!pre) return;
-    const container = document.createElement("div");
-    container.className = "mermaid-diagram";
-    container.id = `mermaid-${Date.now()}-${index}`;
-    pre.replaceWith(container);
-    targets.push({ container, code: block.textContent ?? "" });
-  });
-
-  try {
-    const mermaid = (await import("mermaid")).default;
-    if (isCancelled()) return;
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      ...mermaidTheme(theme, root),
-    });
-    // `render` hands back the SVG string, which avoids the silent layout
-    // failures that `run` can hit when the container has just been swapped in.
-    for (const [index, target] of targets.entries()) {
-      const { svg } = await mermaid.render(
-        `markview-mermaid-${Date.now()}-${index}`,
-        target.code,
-      );
-      if (isCancelled()) return;
-      target.container.innerHTML = svg;
-    }
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? `${error.name}: ${error.message}`
-        : String(error);
-    console.warn("mermaid render failed", error);
-    targets.forEach(({ container }) => {
-      container.textContent = `mermaid error: ${message}`;
-    });
-  }
 }
 
 function handleLinkClick(
