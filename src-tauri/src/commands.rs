@@ -56,9 +56,14 @@ fn start_watcher(app: &AppHandle, state: &AppState, folder: &Path) {
     }
 }
 
-fn tree_result(state: &AppState, path: &Path) -> Value {
+fn tree_result(state: &AppState, path: &Path, expanded: &[String]) -> Value {
     let cfg = scan_config(state);
-    let tree = folders::get_tree(path, &cfg, 1);
+    let expanded: std::collections::HashSet<String> = expanded.iter().cloned().collect();
+    let tree = if expanded.is_empty() {
+        folders::get_tree(path, &cfg, 1)
+    } else {
+        folders::get_tree_scoped(path, &cfg, &expanded)
+    };
     json!({ "path": display_path(path), "tree": tree })
 }
 
@@ -74,11 +79,16 @@ pub fn open_folder_path(app: AppHandle, state: State<'_, AppState>, path: String
     set_workspace(&state, &real);
     remember_folder(&state, &real);
     start_watcher(&app, &state, &real);
-    tree_result(&state, &real)
+    tree_result(&state, &real, &[])
 }
 
 #[tauri::command(async)]
-pub fn get_folder_tree(app: AppHandle, state: State<'_, AppState>, path: String) -> Value {
+pub fn get_folder_tree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    expanded: Option<Vec<String>>,
+) -> Value {
     let Some(valid) = validate_path(&state, &path, false, true, false, true) else {
         return err("Invalid path");
     };
@@ -87,7 +97,7 @@ pub fn get_folder_tree(app: AppHandle, state: State<'_, AppState>, path: String)
         remember_folder(&state, &valid);
         start_watcher(&app, &state, &valid);
     }
-    tree_result(&state, &valid)
+    tree_result(&state, &valid, &expanded.unwrap_or_default())
 }
 
 #[tauri::command(async)]
@@ -173,11 +183,24 @@ pub fn open_file_path(state: State<'_, AppState>, path: String) -> Value {
 }
 
 #[tauri::command]
-pub fn save_file(state: State<'_, AppState>, path: String, content: String) -> Value {
+pub fn save_file(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+    encoding: Option<String>,
+    bom: Option<bool>,
+    line_ending: Option<String>,
+) -> Value {
     let Some(valid) = validate_path(&state, &path, true, false, false, false) else {
         return err("Invalid path");
     };
-    let result = files::write_file_data(&valid, &content);
+    let result = files::write_file_data(
+        &valid,
+        &content,
+        encoding.as_deref(),
+        bom,
+        line_ending.as_deref(),
+    );
     if result.get("success").and_then(Value::as_bool) == Some(true) {
         watcher::note_self_write(&valid);
         remember_file(&state, &valid);
@@ -186,12 +209,25 @@ pub fn save_file(state: State<'_, AppState>, path: String, content: String) -> V
 }
 
 #[tauri::command]
-pub fn save_file_as(state: State<'_, AppState>, path: String, content: String) -> Value {
+pub fn save_file_as(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+    encoding: Option<String>,
+    bom: Option<bool>,
+    line_ending: Option<String>,
+) -> Value {
     let raw = PathBuf::from(&path);
     if !raw.is_absolute() {
         return err("Invalid path");
     }
-    let result = files::write_file_data(&raw, &content);
+    let result = files::write_file_data(
+        &raw,
+        &content,
+        encoding.as_deref(),
+        bom,
+        line_ending.as_deref(),
+    );
     if result.get("success").and_then(Value::as_bool) == Some(true) {
         watcher::note_self_write(&raw);
         remember_file(&state, &raw);

@@ -9,6 +9,7 @@ mod state;
 mod watcher;
 
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use percent_encoding::percent_decode_str;
 use tauri::http::Response;
@@ -68,19 +69,51 @@ fn not_found() -> Response<Vec<u8>> {
 /// Serve local images referenced from the markdown preview. Access is checked
 /// against the same trusted-roots model as the IPC commands, so a document
 /// cannot pull arbitrary files off disk.
-fn serve_image(app: &tauri::AppHandle, uri_path: &str) -> Response<Vec<u8>> {
+fn image_etag(meta: &std::fs::Metadata) -> String {
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("W/\"{mtime:x}-{:x}\"", meta.len())
+}
+
+fn not_modified(etag: &str) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(304)
+        .header("ETag", etag)
+        .header("Cache-Control", "private, max-age=300, must-revalidate")
+        .header("Access-Control-Allow-Origin", "*")
+        .body(Vec::new())
+        .expect("static response")
+}
+
+fn serve_image(
+    app: &tauri::AppHandle,
+    uri_path: &str,
+    if_none_match: Option<&str>,
+) -> Response<Vec<u8>> {
     let state = app.state::<AppState>();
     let raw = decode_uri_path(uri_path);
     let Some(path) = security::validate_path(&state, &raw, true, true, true, true) else {
         return not_found();
     };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return not_found();
+    };
+    let etag = image_etag(&meta);
+    if if_none_match.is_some_and(|value| value == etag) {
+        return not_modified(&etag);
+    }
     let Ok(bytes) = std::fs::read(&path) else {
         return not_found();
     };
     Response::builder()
         .status(200)
         .header("Content-Type", mime_for(&path))
-        .header("Cache-Control", "no-cache")
+        .header("ETag", etag)
+        .header("Cache-Control", "private, max-age=300, must-revalidate")
         .header("X-Content-Type-Options", "nosniff")
         .header("Access-Control-Allow-Origin", "*")
         .body(bytes)
@@ -105,8 +138,17 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .register_uri_scheme_protocol("markview", |ctx, request| {
-            serve_image(ctx.app_handle(), request.uri().path())
+        .register_asynchronous_uri_scheme_protocol("markview", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let uri_path = request.uri().path().to_string();
+            let if_none_match = request
+                .headers()
+                .get("if-none-match")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            std::thread::spawn(move || {
+                responder.respond(serve_image(&app, &uri_path, if_none_match.as_deref()));
+            });
         })
         .setup(|app| {
             let data_dir = state::app_data_dir();

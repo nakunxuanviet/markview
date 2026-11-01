@@ -13,6 +13,7 @@ import {
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   bracketMatching,
+  foldGutter,
   foldKeymap,
   indentOnInput,
   indentUnit,
@@ -56,6 +57,11 @@ export function EditorPane() {
   const wrapCompartment = useRef(new Compartment());
   const tabSizeCompartment = useRef(new Compartment());
   const bracketCompartment = useRef(new Compartment());
+  const closeBracketsCompartment = useRef(new Compartment());
+  const activeLineCompartment = useRef(new Compartment());
+  const indentOnInputCompartment = useRef(new Compartment());
+  const indentUnitCompartment = useRef(new Compartment());
+  const foldGutterCompartment = useRef(new Compartment());
 
   const statsRef = useRef({ words: 0, bytes: 0 });
   const statusFrame = useRef<number | undefined>(undefined);
@@ -75,6 +81,15 @@ export function EditorPane() {
   const matchBrackets = useStore(
     (state) => state.settings.editor.match_brackets,
   );
+  const autoCloseBrackets = useStore(
+    (state) => state.settings.editor.auto_close_brackets,
+  );
+  const autoIndent = useStore((state) => state.settings.editor.auto_indent);
+  const highlightActiveLineSetting = useStore(
+    (state) => state.settings.editor.highlight_active_line,
+  );
+  const insertSpaces = useStore((state) => state.settings.editor.insert_spaces);
+  const codeFolding = useStore((state) => state.settings.editor.code_folding);
 
   const dispatchStatus = useCallback((view: EditorView) => {
     const head = view.state.selection.main.head;
@@ -150,17 +165,33 @@ export function EditorPane() {
           bracketCompartment.current.of(
             settings.settings.editor.match_brackets ? bracketMatching() : [],
           ),
-          highlightActiveLineGutter(),
+          closeBracketsCompartment.current.of(
+            settings.settings.editor.auto_close_brackets ? closeBrackets() : [],
+          ),
+          activeLineCompartment.current.of(
+            settings.settings.editor.highlight_active_line
+              ? [highlightActiveLine(), highlightActiveLineGutter()]
+              : [],
+          ),
+          indentOnInputCompartment.current.of(
+            settings.settings.editor.auto_indent ? indentOnInput() : [],
+          ),
+          indentUnitCompartment.current.of(
+            indentUnit.of(
+              settings.settings.editor.insert_spaces
+                ? " ".repeat(tabSizeValue)
+                : "\t",
+            ),
+          ),
+          foldGutterCompartment.current.of(
+            settings.settings.editor.code_folding ? foldGutter() : [],
+          ),
           highlightSpecialChars(),
           history(),
           drawSelection(),
           dropCursor(),
           EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          indentUnit.of(" ".repeat(tabSizeValue)),
-          highlightActiveLine(),
           highlightSelectionMatches(),
-          closeBrackets(),
           autocompletion({
             override: [snippetSource],
             activateOnTyping: true,
@@ -219,6 +250,27 @@ export function EditorPane() {
         ),
         bracketCompartment.current.reconfigure(
           state.settings.editor.match_brackets ? bracketMatching() : [],
+        ),
+        closeBracketsCompartment.current.reconfigure(
+          state.settings.editor.auto_close_brackets ? closeBrackets() : [],
+        ),
+        activeLineCompartment.current.reconfigure(
+          state.settings.editor.highlight_active_line
+            ? [highlightActiveLine(), highlightActiveLineGutter()]
+            : [],
+        ),
+        indentOnInputCompartment.current.reconfigure(
+          state.settings.editor.auto_indent ? indentOnInput() : [],
+        ),
+        indentUnitCompartment.current.reconfigure(
+          indentUnit.of(
+            state.settings.editor.insert_spaces
+              ? " ".repeat(state.settings.editor.tab_size || 4)
+              : "\t",
+          ),
+        ),
+        foldGutterCompartment.current.reconfigure(
+          state.settings.editor.code_folding ? foldGutter() : [],
         ),
       ],
     });
@@ -423,6 +475,11 @@ export function EditorPane() {
     wordWrap,
     tabSize,
     matchBrackets,
+    autoCloseBrackets,
+    autoIndent,
+    highlightActiveLineSetting,
+    insertSpaces,
+    codeFolding,
     applyCompartments,
     rememberState,
   ]);

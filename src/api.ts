@@ -63,8 +63,8 @@ export const api = {
   // Folders
   openFolder: (path: string) =>
     invoke<FolderTree>("open_folder_path", { path }),
-  getFolderTree: (path: string) =>
-    invoke<FolderTree>("get_folder_tree", { path }),
+  getFolderTree: (path: string, expanded: string[] = []) =>
+    invoke<FolderTree>("get_folder_tree", { path, expanded }),
   getFolderChildren: (path: string) =>
     invoke<TreeNode[]>("get_folder_children", { path }),
   createFile: (folder: string, name: string) =>
@@ -83,10 +83,34 @@ export const api = {
   // Files
   openFileByPath: (path: string) =>
     invoke<FileData>("open_file_path", { path }),
-  saveFile: (path: string, content: string) =>
-    invoke<OpResult>("save_file", { path, content }),
-  saveFileAs: (path: string, content: string) =>
-    invoke<OpResult>("save_file_as", { path, content }),
+  saveFile: (
+    path: string,
+    content: string,
+    encoding?: string,
+    bom?: boolean,
+    lineEnding?: string,
+  ) =>
+    invoke<OpResult>("save_file", {
+      path,
+      content,
+      encoding,
+      bom,
+      lineEnding,
+    }),
+  saveFileAs: (
+    path: string,
+    content: string,
+    encoding?: string,
+    bom?: boolean,
+    lineEnding?: string,
+  ) =>
+    invoke<OpResult>("save_file_as", {
+      path,
+      content,
+      encoding,
+      bom,
+      lineEnding,
+    }),
   getRecentFiles: () => invoke<string[]>("get_recent_files"),
   getRecentFolders: () => invoke<string[]>("get_recent_folders"),
 

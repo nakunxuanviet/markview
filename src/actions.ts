@@ -14,9 +14,15 @@ export async function saveActiveAs(): Promise<void> {
   const path = await pickSavePath(tab.filename);
   if (!path) return;
   try {
-    const result = await api.saveFileAs(path, content);
+    const result = await api.saveFileAs(
+      path,
+      content,
+      tab.encoding,
+      tab.bom,
+      tab.lineEnding,
+    );
     if (result?.error) {
-      toast.show(result.error, { type: "error" });
+      toast.show(result.message ?? result.error, { type: "error" });
       return;
     }
     useStore.getState().touchTab(tab.id);
@@ -29,6 +35,10 @@ export async function saveActiveAs(): Promise<void> {
           filename: basename(result.path ?? path),
           content,
           modified: false,
+          mixedLineEndings: false,
+          encoding: result.encoding ?? current.tabs[tab.id].encoding,
+          bom: result.bom ?? current.tabs[tab.id].bom,
+          lineEnding: result.line_ending ?? current.tabs[tab.id].lineEnding,
         },
       },
     }));

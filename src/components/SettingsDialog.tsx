@@ -16,11 +16,18 @@ const THEME_OPTIONS = [
 ];
 
 const ENCODING_OPTIONS = [
-  { label: "UTF-8", value: "utf-8" },
-  { label: "UTF-8 with BOM", value: "utf-8-sig" },
-  { label: "UTF-16", value: "utf-16" },
-  { label: "Windows-1252", value: "windows-1252" },
-  { label: "ISO-8859-1", value: "iso-8859-1" },
+  { label: "UTF-8", value: "UTF-8" },
+  { label: "UTF-8 with BOM", value: "UTF-8 BOM" },
+  { label: "UTF-16 LE", value: "UTF-16 LE" },
+  { label: "UTF-16 BE", value: "UTF-16 BE" },
+  { label: "Windows-1252", value: "Windows-1252" },
+  { label: "Shift_JIS", value: "Shift_JIS" },
+];
+
+const LINE_ENDING_OPTIONS = [
+  { label: "LF (\\n)", value: "lf" },
+  { label: "CRLF (\\r\\n)", value: "crlf" },
+  { label: "CR (\\r)", value: "cr" },
 ];
 
 export function SettingsDialog() {
@@ -333,6 +340,26 @@ export function SettingsDialog() {
               />
             </div>
             <div className="setting-row">
+              <label>Insert spaces</label>
+              <input
+                type="checkbox"
+                checked={settings.editor.insert_spaces}
+                onChange={(event) =>
+                  update({ editor: { insert_spaces: event.target.checked } })
+                }
+              />
+            </div>
+            <div className="setting-row">
+              <label>Code folding</label>
+              <input
+                type="checkbox"
+                checked={settings.editor.code_folding}
+                onChange={(event) =>
+                  update({ editor: { code_folding: event.target.checked } })
+                }
+              />
+            </div>
+            <div className="setting-row">
               <label>Auto close brackets</label>
               <input
                 type="checkbox"
@@ -412,6 +439,17 @@ export function SettingsDialog() {
                 options={ENCODING_OPTIONS}
                 onChange={(value) =>
                   update({ files: { default_encoding: value } })
+                }
+              />
+            </div>
+            <div className="setting-row">
+              <label>Default line endings</label>
+              <SelectMenu
+                ariaLabel="Default line endings"
+                value={settings.files.default_line_ending}
+                options={LINE_ENDING_OPTIONS}
+                onChange={(value) =>
+                  update({ files: { default_line_ending: value } })
                 }
               />
             </div>

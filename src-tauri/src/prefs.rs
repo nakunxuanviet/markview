@@ -35,7 +35,7 @@ pub fn default_settings() -> Value {
         "files": {
             "auto_save": false,
             "auto_save_interval": 30,
-            "default_encoding": "utf-8",
+            "default_encoding": "UTF-8",
             "default_line_ending": "lf",
             "visible_extensions": [".md", ".markdown", ".mdx", ".txt", ".xlsx", ".xls", ".docx", ".doc", ".pdf", ".pptx", ".csv"],
             "show_hidden_files": false,

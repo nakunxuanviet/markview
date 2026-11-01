@@ -16,9 +16,14 @@ export interface FolderTree {
   tree: TreeNode[];
 }
 
+export type LineEnding = "lf" | "crlf" | "cr";
+
 export interface FileData {
   content?: string;
   encoding?: string;
+  bom?: boolean;
+  line_ending?: LineEnding;
+  mixed_line_endings?: boolean;
   size?: number;
   path?: string;
   filename?: string;
@@ -28,10 +33,14 @@ export interface FileData {
 export interface OpResult {
   success?: boolean;
   error?: string;
+  message?: string;
   path?: string;
   name?: string;
   old_path?: string;
   new_path?: string;
+  encoding?: string;
+  bom?: boolean;
+  line_ending?: LineEnding;
 }
 
 export interface Tab {
@@ -44,6 +53,9 @@ export interface Tab {
   scrollTop: number;
   isPreview: boolean;
   encoding: string;
+  bom: boolean;
+  lineEnding: LineEnding;
+  mixedLineEndings: boolean;
 }
 
 export interface SearchHit {
@@ -172,6 +184,9 @@ export interface SessionTab {
   cursor_pos: number;
   scroll_top: number;
   modified: boolean;
+  encoding?: string;
+  bom?: boolean;
+  line_ending?: LineEnding;
 }
 
 export interface SessionData {

@@ -9,6 +9,7 @@ import type {
   FileData,
   FsEvent,
   Heading,
+  LineEnding,
   SingleView,
   Tab,
   Theme,
@@ -90,7 +91,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   files: {
     auto_save: false,
     auto_save_interval: 30,
-    default_encoding: "utf-8",
+    default_encoding: "UTF-8",
     default_line_ending: "lf",
     visible_extensions: [".md", ".markdown", ".mdx", ".txt"],
     show_hidden_files: false,
@@ -115,6 +116,24 @@ export const DEFAULT_SETTINGS: AppSettings = {
   recent_folders: [],
   language: "en",
 };
+
+function normalizeEncodingLabel(value?: string): string {
+  const label = (value ?? "utf-8").toLowerCase();
+  if (label.includes("bom") || label.includes("sig")) return "UTF-8 BOM";
+  if (label.includes("utf-16") && label.includes("be")) return "UTF-16 BE";
+  if (label.includes("utf-16")) return "UTF-16 LE";
+  if (label.includes("1252")) return "Windows-1252";
+  if (label.includes("shift")) return "Shift_JIS";
+  return "UTF-8";
+}
+
+function normalizeLineEnding(value?: string): LineEnding {
+  return value === "crlf" ? "crlf" : value === "cr" ? "cr" : "lf";
+}
+
+function defaultBom(encoding: string): boolean {
+  return encoding === "UTF-8 BOM" || encoding.startsWith("UTF-16");
+}
 
 function deepMerge<T>(base: T, patch: unknown): T {
   if (typeof base !== "object" || base === null || Array.isArray(base)) {
@@ -158,6 +177,34 @@ function findNode(nodes: TreeNode[], path: string): TreeNode | null {
     }
   }
   return null;
+}
+
+function pruneExpanded(
+  tree: TreeNode[],
+  expanded: Record<string, boolean>,
+): Record<string, boolean> {
+  const alive = new Set<string>();
+  const walk = (nodes: TreeNode[]) => {
+    for (const node of nodes) {
+      if (node.type === "folder") {
+        alive.add(node.path);
+        if (node.children) walk(node.children);
+      }
+    }
+  };
+  walk(tree);
+  return Object.fromEntries(
+    Object.entries(expanded).filter(([path, open]) => open && alive.has(path)),
+  );
+}
+
+let treeRefreshTimer: number | undefined;
+function scheduleTreeRefresh(refresh: () => Promise<void>) {
+  if (treeRefreshTimer !== undefined) window.clearTimeout(treeRefreshTimer);
+  treeRefreshTimer = window.setTimeout(() => {
+    treeRefreshTimer = undefined;
+    void refresh();
+  }, 150);
 }
 
 export interface SessionBuild {
@@ -219,6 +266,10 @@ export interface AppStore {
   markModified: (id: string) => void;
   /** Bump the session revision without changing the modified flag. */
   touchTab: (id: string) => void;
+  setTabFormat: (
+    id: string,
+    patch: { encoding?: string; bom?: boolean; lineEnding?: LineEnding },
+  ) => void;
   snapshotActive: () => void;
   replaceTabContent: (id: string, content: string, markClean?: boolean) => void;
 
@@ -299,6 +350,18 @@ export const useStore = create<AppStore>((set, get) => ({
     } catch (error) {
       console.error("Failed to load settings", error);
     }
+    settings = {
+      ...settings,
+      files: {
+        ...settings.files,
+        default_encoding: normalizeEncodingLabel(
+          settings.files.default_encoding,
+        ),
+        default_line_ending: normalizeLineEnding(
+          settings.files.default_line_ending,
+        ),
+      },
+    };
 
     set({
       settings,
@@ -330,7 +393,10 @@ export const useStore = create<AppStore>((set, get) => ({
               cursorPos: data.cursor_pos ?? 0,
               scrollTop: data.scroll_top ?? 0,
               isPreview: false,
-              encoding: "UTF-8",
+              encoding: data.encoding ?? "UTF-8",
+              bom: data.bom ?? defaultBom(data.encoding ?? "UTF-8"),
+              lineEnding: normalizeLineEnding(data.line_ending),
+              mixedLineEndings: false,
             };
             order.push(id);
             tabRevisions.set(id, 0);
@@ -398,6 +464,9 @@ export const useStore = create<AppStore>((set, get) => ({
   createTab: (opts = {}) => {
     get().snapshotActive();
     const id = opts.id ?? nextId();
+    const fileSettings = get().settings.files;
+    const encoding =
+      opts.encoding ?? normalizeEncodingLabel(fileSettings.default_encoding);
     const tab: Tab = {
       id,
       path: opts.path ?? null,
@@ -407,7 +476,12 @@ export const useStore = create<AppStore>((set, get) => ({
       cursorPos: opts.cursorPos ?? 0,
       scrollTop: opts.scrollTop ?? 0,
       isPreview: opts.isPreview ?? false,
-      encoding: opts.encoding ?? "UTF-8",
+      encoding,
+      bom: opts.bom ?? defaultBom(encoding),
+      lineEnding:
+        opts.lineEnding ??
+        normalizeLineEnding(fileSettings.default_line_ending),
+      mixedLineEndings: opts.mixedLineEndings ?? false,
     };
     tabRevisions.set(id, 0);
     backedUpRevisions.delete(id);
@@ -506,12 +580,26 @@ export const useStore = create<AppStore>((set, get) => ({
 
     if (tab.path) {
       try {
-        const result = await api.saveFile(tab.path, content);
+        const result = await api.saveFile(
+          tab.path,
+          content,
+          tab.encoding,
+          tab.bom,
+          tab.lineEnding,
+        );
         if (result?.success) {
           set((state) => ({
             tabs: {
               ...state.tabs,
-              [id]: { ...state.tabs[id], content, modified: false },
+              [id]: {
+                ...state.tabs[id],
+                content,
+                modified: false,
+                mixedLineEndings: false,
+                encoding: result.encoding ?? state.tabs[id].encoding,
+                bom: result.bom ?? state.tabs[id].bom,
+                lineEnding: result.line_ending ?? state.tabs[id].lineEnding,
+              },
             },
           }));
           toast.show(`Saved ${tab.filename}`, {
@@ -520,7 +608,9 @@ export const useStore = create<AppStore>((set, get) => ({
           });
           return true;
         }
-        toast.show(result?.error ?? "Save failed", { type: "error" });
+        toast.show(result?.message ?? result?.error ?? "Save failed", {
+          type: "error",
+        });
       } catch (error) {
         toast.show(`Save failed: ${String(error)}`, { type: "error" });
       }
@@ -534,7 +624,13 @@ export const useStore = create<AppStore>((set, get) => ({
     if (!path) return false;
 
     try {
-      const result = await api.saveFileAs(path, content);
+      const result = await api.saveFileAs(
+        path,
+        content,
+        tab.encoding,
+        tab.bom,
+        tab.lineEnding,
+      );
       if (result?.success) {
         get().touchTab(id);
         set((state) => ({
@@ -546,6 +642,10 @@ export const useStore = create<AppStore>((set, get) => ({
               filename: basename(result.path ?? path),
               content,
               modified: false,
+              mixedLineEndings: false,
+              encoding: result.encoding ?? state.tabs[id].encoding,
+              bom: result.bom ?? state.tabs[id].bom,
+              lineEnding: result.line_ending ?? state.tabs[id].lineEnding,
             },
           },
         }));
@@ -556,7 +656,9 @@ export const useStore = create<AppStore>((set, get) => ({
         await get().refreshTree();
         return true;
       }
-      toast.show(result?.error ?? "Save failed", { type: "error" });
+      toast.show(result?.message ?? result?.error ?? "Save failed", {
+        type: "error",
+      });
     } catch (error) {
       toast.show(`Save failed: ${String(error)}`, { type: "error" });
     }
@@ -581,6 +683,25 @@ export const useStore = create<AppStore>((set, get) => ({
 
   touchTab: (id) => {
     tabRevisions.set(id, (tabRevisions.get(id) ?? 0) + 1);
+  },
+
+  setTabFormat: (id, patch) => {
+    const tab = get().tabs[id];
+    if (!tab) return;
+    tabRevisions.set(id, (tabRevisions.get(id) ?? 0) + 1);
+    set((state) => ({
+      tabs: {
+        ...state.tabs,
+        [id]: {
+          ...state.tabs[id],
+          ...patch,
+          mixedLineEndings: patch.lineEnding
+            ? false
+            : state.tabs[id].mixedLineEndings,
+          modified: true,
+        },
+      },
+    }));
   },
 
   snapshotActive: () => {
@@ -661,6 +782,11 @@ export const useStore = create<AppStore>((set, get) => ({
             content,
             filename: data.filename ?? existing.filename,
             encoding: data.encoding ?? existing.encoding,
+            bom: data.bom ?? existing.bom,
+            lineEnding: data.line_ending ?? existing.lineEnding,
+            mixedLineEndings:
+              data.mixed_line_endings ??
+              current.tabs[existing.id].mixedLineEndings,
             isPreview: isPreview ? current.tabs[existing.id].isPreview : false,
           },
         },
@@ -688,7 +814,10 @@ export const useStore = create<AppStore>((set, get) => ({
       path: data.path,
       filename: data.filename ?? basename(data.path),
       content: data.content ?? "",
-      encoding: data.encoding ?? "UTF-8",
+      encoding: data.encoding,
+      bom: data.bom,
+      lineEnding: data.line_ending,
+      mixedLineEndings: data.mixed_line_endings,
       isPreview,
     });
     if (isPreview) set({ previewTabId: id });
@@ -719,11 +848,18 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   refreshTree: async () => {
-    const workspace = get().workspace;
+    const state = get();
+    const workspace = state.workspace;
     if (!workspace) return;
+    const expandedPaths = Object.entries(state.expanded)
+      .filter(([, open]) => open)
+      .map(([path]) => path);
     try {
-      const result = await api.getFolderTree(workspace);
-      if (result) set({ tree: result.tree ?? [] });
+      const result = await api.getFolderTree(workspace, expandedPaths);
+      if (result) {
+        const tree = result.tree ?? [];
+        set({ tree, expanded: pruneExpanded(tree, get().expanded) });
+      }
     } catch {
       /* folder may have been removed */
     }
@@ -873,7 +1009,8 @@ export const useStore = create<AppStore>((set, get) => ({
   handleFsEvent: async (event) => {
     const state = get();
     if (event.type !== "modified") {
-      await get().refreshTree();
+      // Watcher batches can contain several paths; scan once.
+      scheduleTreeRefresh(() => get().refreshTree());
     }
 
     if (event.type !== "modified" || event.is_directory) return;
@@ -939,6 +1076,9 @@ export const useStore = create<AppStore>((set, get) => ({
           ? (editorRef.view?.scrollDOM.scrollTop ?? tab.scrollTop)
           : tab.scrollTop,
         modified: tab.modified,
+        encoding: tab.encoding,
+        bom: tab.bom,
+        line_ending: tab.lineEnding,
       };
       if (dirty) {
         entry.content = hydrated ? currentEditorContent() : tab.content;

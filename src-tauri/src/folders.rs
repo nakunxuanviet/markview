@@ -1,5 +1,6 @@
 //! Folder tree + file/folder CRUD.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -45,6 +46,93 @@ impl ScanConfig {
 
 pub fn get_tree(root: &Path, cfg: &ScanConfig, max_depth: usize) -> Vec<TreeNode> {
     scan(root, cfg, 0, max_depth)
+}
+
+/// Scan the root plus only the branches listed in `expanded`. This keeps a
+/// watcher refresh from discarding children of folders the user has open.
+pub fn get_tree_scoped(root: &Path, cfg: &ScanConfig, expanded: &HashSet<String>) -> Vec<TreeNode> {
+    scan_scoped(root, cfg, expanded)
+}
+
+fn scan_scoped(dir: &Path, cfg: &ScanConfig, expanded: &HashSet<String>) -> Vec<TreeNode> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut names: Vec<std::ffi::OsString> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name())
+        .collect();
+    names.sort_by_key(|n| n.to_string_lossy().to_lowercase());
+
+    let mut folders = Vec::new();
+    let mut files = Vec::new();
+
+    for name_os in names {
+        let name = name_os.to_string_lossy().to_string();
+        if !cfg.show_hidden && name.starts_with('.') {
+            continue;
+        }
+        if cfg.exclude.iter().any(|p| p == &name) {
+            continue;
+        }
+
+        let full = dir.join(&name_os);
+        let meta = match std::fs::metadata(&full) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        if meta.is_dir() {
+            let path = display_path(&full);
+            let children = if expanded.contains(&path) {
+                scan_scoped(&full, cfg, expanded)
+            } else {
+                Vec::new()
+            };
+            folders.push(TreeNode {
+                name,
+                path,
+                kind: "folder".into(),
+                children: Some(children),
+                modified: None,
+                size: None,
+            });
+        } else if meta.is_file() {
+            let ext = format!(
+                ".{}",
+                full.extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default()
+            );
+            if !cfg.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext)) {
+                continue;
+            }
+            let modified = meta
+                .modified()
+                .ok()
+                .map(|t| chrono::DateTime::<chrono::Local>::from(t).to_rfc3339());
+            files.push(TreeNode {
+                name,
+                path: display_path(&full),
+                kind: "file".into(),
+                children: None,
+                modified,
+                size: Some(meta.len()),
+            });
+        }
+    }
+
+    if cfg.folders_first {
+        folders.extend(files);
+        folders
+    } else {
+        let mut all = folders;
+        all.extend(files);
+        all.sort_by_key(|n| n.name.to_lowercase());
+        all
+    }
 }
 
 fn scan(dir: &Path, cfg: &ScanConfig, depth: usize, max_depth: usize) -> Vec<TreeNode> {
@@ -299,4 +387,61 @@ pub fn search_filenames(root: &Path, query: &str, cfg: &ScanConfig) -> Vec<Value
         }
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> ScanConfig {
+        ScanConfig {
+            extensions: vec![".md".into()],
+            show_hidden: false,
+            exclude: Vec::new(),
+            folders_first: true,
+        }
+    }
+
+    fn find<'a>(nodes: &'a [TreeNode], name: &str) -> Option<&'a TreeNode> {
+        for node in nodes {
+            if node.name == name {
+                return Some(node);
+            }
+            if let Some(children) = &node.children {
+                if let Some(found) = find(children, name) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn scoped_tree_keeps_expanded_branches() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("markview-tree-{}-{stamp}", std::process::id()));
+        std::fs::create_dir_all(root.join("a/b")).expect("dirs");
+        std::fs::create_dir_all(root.join("c")).expect("dirs");
+        std::fs::write(root.join("a/two.md"), "two").expect("file");
+        std::fs::write(root.join("a/b/one.md"), "one").expect("file");
+        std::fs::write(root.join("c/three.md"), "three").expect("file");
+
+        let mut expanded = HashSet::new();
+        expanded.insert(display_path(&root.join("a")));
+        expanded.insert(display_path(&root.join("a/b")));
+        let tree = get_tree_scoped(&root, &cfg(), &expanded);
+
+        let a = find(&tree, "a").expect("a");
+        assert!(find(a.children.as_deref().unwrap_or(&[]), "two.md").is_some());
+        let b = find(a.children.as_deref().unwrap_or(&[]), "b").expect("b");
+        assert!(find(b.children.as_deref().unwrap_or(&[]), "one.md").is_some());
+        let c = find(&tree, "c").expect("c");
+        assert!(c.children.as_deref().unwrap_or(&[]).is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
