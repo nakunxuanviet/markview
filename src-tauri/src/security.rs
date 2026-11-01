@@ -401,14 +401,17 @@ mod tests {
             .expect("trusted")
             .insert(real_path(&doc));
 
-        assert!(is_assets_sibling_of_trusted_file(&state, &assets));
         assert!(is_assets_sibling_of_trusted_file(
             &state,
-            &assets.join("img.png")
+            &real_path(&assets)
+        ));
+        assert!(is_assets_sibling_of_trusted_file(
+            &state,
+            &real_path(&assets).join("img.png")
         ));
         assert!(!is_assets_sibling_of_trusted_file(
             &state,
-            &root.join("other").join("img.png")
+            &real_path(&root.join("other")).join("img.png")
         ));
         let _ = std::fs::remove_dir_all(root);
     }
