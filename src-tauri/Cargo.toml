@@ -1,6 +1,6 @@
 [package]
 name = "markview"
-version = "2.1.0"
+version = "2.2.0"
 description = "MarkView - Markdown Editor"
 authors = ["VietTX5"]
 edition = "2021"

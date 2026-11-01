@@ -13,7 +13,7 @@ function resolveVersion(): Promise<string> {
         return version;
       })
       .catch(() => {
-        cached = "2.1.0";
+        cached = "2.2.0";
         return cached;
       });
   }
@@ -22,7 +22,7 @@ function resolveVersion(): Promise<string> {
 
 /** App version from the Tauri bundle, with a safe fallback outside Tauri. */
 export function useAppVersion(): string {
-  const [version, setVersion] = useState(cached ?? "2.1.0");
+  const [version, setVersion] = useState(cached ?? "2.2.0");
 
   useEffect(() => {
     let alive = true;
