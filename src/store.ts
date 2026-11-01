@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import {
   basename,
+  dirname,
   normalizeNewlines,
   normalizePath,
   parseHeadings,
@@ -31,6 +32,7 @@ const tabRevisions = new Map<string, number>();
 const backedUpRevisions = new Map<string, number>();
 let lastSavedMetaHash = "";
 let sessionSaving = false;
+let saveAllRunning = false;
 
 function hashString(value: string): string {
   let hash = 0x811c9dc5;
@@ -72,11 +74,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     sidebar_width: 250,
     sidebar_visible: true,
     preview_visible: true,
-    preview_position: "right",
     show_toolbar: true,
     show_statusbar: true,
     show_line_numbers: true,
-    show_minimap: false,
   },
   editor: {
     word_wrap: true,
@@ -87,6 +87,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     highlight_active_line: true,
     match_brackets: true,
     code_folding: false,
+    spellcheck: false,
   },
   files: {
     auto_save: false,
@@ -95,7 +96,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
     default_line_ending: "lf",
     visible_extensions: [".md", ".markdown", ".mdx", ".txt"],
     show_hidden_files: false,
-    sort_by: "name_asc",
     folders_first: true,
     folder_label_segments: 2,
     exclude_patterns: ["node_modules", ".git", "__pycache__", ".DS_Store"],
@@ -105,16 +105,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     render_mermaid: true,
     render_math: true,
     double_click_preview: true,
-    code_theme: "github-dark",
   },
   session: {
     restore_session: true,
     backup_interval: 10,
-    remember_folder: true,
   },
   recent_files: [],
   recent_folders: [],
-  language: "en",
 };
 
 function normalizeEncodingLabel(value?: string): string {
@@ -207,10 +204,284 @@ function scheduleTreeRefresh(refresh: () => Promise<void>) {
   }, 150);
 }
 
+function sortTreeChildren(
+  nodes: TreeNode[],
+  foldersFirst: boolean,
+): TreeNode[] {
+  return [...nodes].sort((left, right) => {
+    if (foldersFirst && left.type !== right.type) {
+      return left.type === "folder" ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name, undefined, {
+      sensitivity: "base",
+    });
+  });
+}
+
+function insertTreeNode(
+  nodes: TreeNode[],
+  parentPath: string,
+  node: TreeNode,
+  foldersFirst: boolean,
+): { tree: TreeNode[]; inserted: boolean } {
+  let inserted = false;
+  const tree = nodes.map((item) => {
+    if (inserted) return item;
+    if (item.type === "folder" && item.path === parentPath) {
+      const children = item.children ? [...item.children] : [];
+      if (
+        children.some(
+          (child) => normalizePath(child.path) === normalizePath(node.path),
+        )
+      ) {
+        inserted = true;
+        return item;
+      }
+      children.push(node);
+      inserted = true;
+      return {
+        ...item,
+        children: sortTreeChildren(children, foldersFirst),
+      };
+    }
+    if (item.children) {
+      const nested = insertTreeNode(
+        item.children,
+        parentPath,
+        node,
+        foldersFirst,
+      );
+      if (nested.inserted) {
+        inserted = true;
+        return { ...item, children: nested.tree };
+      }
+    }
+    return item;
+  });
+  return { tree, inserted };
+}
+
+function removeTreeNode(
+  nodes: TreeNode[],
+  path: string,
+): { tree: TreeNode[]; removed: TreeNode | null } {
+  let removed: TreeNode | null = null;
+  const tree: TreeNode[] = [];
+  for (const item of nodes) {
+    if (normalizePath(item.path) === normalizePath(path)) {
+      removed = item;
+      continue;
+    }
+    if (item.children) {
+      const nested = removeTreeNode(item.children, path);
+      if (nested.removed) {
+        removed = nested.removed;
+        tree.push({ ...item, children: nested.tree });
+        continue;
+      }
+    }
+    tree.push(item);
+  }
+  return { tree, removed };
+}
+
+function rebaseNode(
+  node: TreeNode,
+  oldPath: string,
+  newPath: string,
+): TreeNode {
+  const oldNorm = normalizePath(oldPath);
+  const norm = normalizePath(node.path);
+  const nextPath =
+    norm === oldNorm
+      ? newPath
+      : norm.startsWith(oldNorm + "/")
+        ? `${newPath}${node.path.slice(oldPath.length)}`
+        : node.path;
+  return {
+    ...node,
+    path: nextPath,
+    name: basename(nextPath),
+    children: node.children?.map((child) =>
+      rebaseNode(child, oldPath, newPath),
+    ),
+  };
+}
+
+function rebaseExpanded(
+  expanded: Record<string, boolean>,
+  oldPath: string,
+  newPath: string,
+): Record<string, boolean> {
+  const oldNorm = normalizePath(oldPath);
+  const next: Record<string, boolean> = {};
+  for (const [path, open] of Object.entries(expanded)) {
+    const norm = normalizePath(path);
+    if (norm === oldNorm) {
+      next[newPath] = open;
+    } else if (norm.startsWith(oldNorm + "/")) {
+      next[`${newPath}${path.slice(oldPath.length)}`] = open;
+    } else {
+      next[path] = open;
+    }
+  }
+  return next;
+}
+
+function pathIsUnder(path: string, root: string): boolean {
+  const value = normalizePath(path);
+  const parent = normalizePath(root);
+  return value === parent || value.startsWith(parent + "/");
+}
+
+function eventVisible(event: FsEvent, settings: AppSettings): boolean {
+  const name = basename(event.path);
+  if (!settings.files.show_hidden_files && name.startsWith(".")) return false;
+  if (
+    settings.files.exclude_patterns.some(
+      (pattern) => normalizePath(pattern) === normalizePath(name),
+    )
+  ) {
+    return false;
+  }
+  if (event.is_directory) return true;
+  const ext = name.includes(".")
+    ? `.${name.split(".").pop()!.toLowerCase()}`
+    : "";
+  return settings.files.visible_extensions.some(
+    (allowed) => allowed.toLowerCase() === ext,
+  );
+}
+
+interface TreePatch {
+  tree: TreeNode[];
+  expanded: Record<string, boolean>;
+  tabs?: Record<string, Tab>;
+  banners?: Banner[];
+}
+
+function patchTreeEvent(state: AppStore, event: FsEvent): TreePatch | null {
+  const workspace = state.workspace;
+  if (!workspace) return null;
+  const root = normalizePath(workspace);
+  const parent = dirname(event.path);
+  const parentVisible =
+    normalizePath(parent) === root || !!state.expanded[parent];
+
+  if (event.type === "created") {
+    if (!parentVisible) {
+      return { tree: state.tree, expanded: state.expanded };
+    }
+    if (!eventVisible(event, state.settings)) {
+      return { tree: state.tree, expanded: state.expanded };
+    }
+    const node: TreeNode = {
+      name: basename(event.path),
+      path: event.path,
+      type: event.is_directory ? "folder" : "file",
+      ...(event.is_directory ? { children: [] } : {}),
+    };
+    const result = insertTreeNode(
+      state.tree,
+      parent,
+      node,
+      state.settings.files.folders_first,
+    );
+    return result.inserted
+      ? { tree: result.tree, expanded: state.expanded }
+      : null;
+  }
+
+  if (event.type === "deleted") {
+    const result = removeTreeNode(state.tree, event.path);
+    if (!result.removed) {
+      return parentVisible
+        ? null
+        : { tree: state.tree, expanded: state.expanded };
+    }
+    const expanded = Object.fromEntries(
+      Object.entries(state.expanded).filter(
+        ([path]) => !pathIsUnder(path, event.path),
+      ),
+    );
+    const affected = Object.values(state.tabs).filter(
+      (tab) => tab.path && pathIsUnder(tab.path, event.path),
+    );
+    const banners =
+      affected.length > 0
+        ? [
+            ...state.banners.filter(
+              (banner) => !affected.some((tab) => tab.id === banner.tabId),
+            ),
+            ...affected.map((tab) => ({
+              id: `${tab.id}_${Date.now()}`,
+              message: `${tab.filename} was removed on disk.`,
+              tabId: tab.id,
+              path: tab.path!,
+            })),
+          ]
+        : state.banners;
+    return { tree: result.tree, expanded, banners };
+  }
+
+  if (event.type === "moved") {
+    const oldPath = event.old_path;
+    if (!oldPath) return null;
+    const result = removeTreeNode(state.tree, oldPath);
+    if (!result.removed) return null;
+    const node = rebaseNode(result.removed, oldPath, event.path);
+    const expanded = rebaseExpanded(state.expanded, oldPath, event.path);
+    const newParent = dirname(event.path);
+    const newParentVisible =
+      normalizePath(newParent) === root || !!state.expanded[newParent];
+
+    let tree = result.tree;
+    if (newParentVisible && eventVisible(event, state.settings)) {
+      const inserted = insertTreeNode(
+        tree,
+        newParent,
+        node,
+        state.settings.files.folders_first,
+      );
+      if (!inserted.inserted) return null;
+      tree = inserted.tree;
+    }
+
+    const tabs = Object.fromEntries(
+      Object.entries(state.tabs).map(([id, tab]) => {
+        if (!tab.path || !pathIsUnder(tab.path, oldPath)) {
+          return [id, tab];
+        }
+        const nextPath = `${event.path}${tab.path.slice(oldPath.length)}`;
+        return [id, { ...tab, path: nextPath, filename: basename(nextPath) }];
+      }),
+    );
+    return { tree, expanded, tabs };
+  }
+
+  return null;
+}
+
 export interface SessionBuild {
   payload: Record<string, unknown>;
   dirtyIds: string[];
   metaHash: string;
+}
+
+export interface SaveAsState {
+  tabId: string;
+  path: string;
+  filename: string;
+  encoding: string;
+  bom: boolean;
+  lineEnding: LineEnding;
+}
+
+let saveAsResolve: ((value: boolean) => void) | null = null;
+
+function settleSaveAs(value: boolean) {
+  saveAsResolve?.(value);
+  saveAsResolve = null;
 }
 
 export interface AppStore {
@@ -238,10 +509,15 @@ export interface AppStore {
   expanded: Record<string, boolean>;
   showWelcome: boolean;
   recentFolders: string[];
+  recentFiles: string[];
+  closedTabs: Tab[];
+  quickOpenMode: "files" | "recent";
 
   headings: Heading[];
   banners: Banner[];
 
+  saveAs: SaveAsState | null;
+  exportOpen: boolean;
   settingsOpen: boolean;
   findOpen: boolean;
   quickOpenOpen: boolean;
@@ -263,6 +539,9 @@ export interface AppStore {
   closeToRight: (id: string) => Promise<void>;
   saveTab: (id: string) => Promise<boolean>;
   saveActive: () => Promise<boolean>;
+  saveAll: () => Promise<{ saved: number; failed: string | null }>;
+  reopenClosedTab: () => Promise<boolean>;
+  refreshRecent: () => Promise<void>;
   markModified: (id: string) => void;
   /** Bump the session revision without changing the modified flag. */
   touchTab: (id: string) => void;
@@ -270,6 +549,13 @@ export interface AppStore {
     id: string,
     patch: { encoding?: string; bom?: boolean; lineEnding?: LineEnding },
   ) => void;
+  beginSaveAs: (id?: string) => Promise<boolean>;
+  confirmSaveAs: (options: {
+    encoding: string;
+    bom: boolean;
+    lineEnding: LineEnding;
+  }) => Promise<boolean>;
+  cancelSaveAs: () => void;
   snapshotActive: () => void;
   replaceTabContent: (id: string, content: string, markClean?: boolean) => void;
 
@@ -327,10 +613,15 @@ export const useStore = create<AppStore>((set, get) => ({
   expanded: {},
   showWelcome: true,
   recentFolders: [],
+  recentFiles: [],
+  closedTabs: [],
+  quickOpenMode: "files",
 
   headings: [],
   banners: [],
 
+  saveAs: null,
+  exportOpen: false,
   settingsOpen: false,
   findOpen: false,
   quickOpenOpen: false,
@@ -440,8 +731,15 @@ export const useStore = create<AppStore>((set, get) => ({
 
     if (!restored) {
       try {
-        const recent = await api.getRecentFolders();
-        set({ recentFolders: recent ?? [], showWelcome: true });
+        const [folders, files] = await Promise.all([
+          api.getRecentFolders(),
+          api.getRecentFiles(),
+        ]);
+        set({
+          recentFolders: folders ?? [],
+          recentFiles: files ?? [],
+          showWelcome: true,
+        });
       } catch {
         /* ignore */
       }
@@ -451,6 +749,7 @@ export const useStore = create<AppStore>((set, get) => ({
 
     set({ ready: true });
     get().refreshHeadings();
+    void get().refreshRecent();
 
     // A markdown file handed to us by Explorer at launch.
     try {
@@ -506,7 +805,15 @@ export const useStore = create<AppStore>((set, get) => ({
   removeTab: (id) => {
     const state = get();
     if (!state.tabs[id]) return;
+    if (state.saveAs?.tabId === id) get().cancelSaveAs();
     state.snapshotActive();
+
+    const closed = get().tabs[id];
+    if (closed && !closed.isPreview) {
+      set((current) => ({
+        closedTabs: [...current.closedTabs, closed].slice(-20),
+      }));
+    }
 
     const idx = state.order.indexOf(id);
     const order = state.order.filter((tabId) => tabId !== id);
@@ -606,6 +913,7 @@ export const useStore = create<AppStore>((set, get) => ({
             type: "success",
             duration: 1500,
           });
+          void get().refreshRecent();
           return true;
         }
         toast.show(result?.message ?? result?.error ?? "Save failed", {
@@ -617,58 +925,134 @@ export const useStore = create<AppStore>((set, get) => ({
       return false;
     }
 
-    const suggested = /\.[a-z0-9]{1,8}$/i.test(tab.filename)
-      ? tab.filename
-      : `${tab.filename}.md`;
-    const path = await pickSavePath(suggested);
-    if (!path) return false;
-
-    try {
-      const result = await api.saveFileAs(
-        path,
-        content,
-        tab.encoding,
-        tab.bom,
-        tab.lineEnding,
-      );
-      if (result?.success) {
-        get().touchTab(id);
-        set((state) => ({
-          tabs: {
-            ...state.tabs,
-            [id]: {
-              ...state.tabs[id],
-              path: result.path ?? path,
-              filename: basename(result.path ?? path),
-              content,
-              modified: false,
-              mixedLineEndings: false,
-              encoding: result.encoding ?? state.tabs[id].encoding,
-              bom: result.bom ?? state.tabs[id].bom,
-              lineEnding: result.line_ending ?? state.tabs[id].lineEnding,
-            },
-          },
-        }));
-        toast.show(`Saved ${basename(path)}`, {
-          type: "success",
-          duration: 1500,
-        });
-        await get().refreshTree();
-        return true;
-      }
-      toast.show(result?.message ?? result?.error ?? "Save failed", {
-        type: "error",
-      });
-    } catch (error) {
-      toast.show(`Save failed: ${String(error)}`, { type: "error" });
-    }
-    return false;
+    return get().beginSaveAs(id);
   },
 
   saveActive: async () => {
     const id = get().activeId;
     if (!id) return false;
     return get().saveTab(id);
+  },
+
+  saveAll: async () => {
+    if (saveAllRunning) return { saved: 0, failed: null };
+    const ids = get().order.filter((id) => get().tabs[id]?.modified);
+    if (ids.length === 0) {
+      toast.show("Nothing to save", { type: "info", duration: 1200 });
+      return { saved: 0, failed: null };
+    }
+
+    saveAllRunning = true;
+    let saved = 0;
+    let failed: string | null = null;
+    try {
+      for (const id of ids) {
+        const tab = get().tabs[id];
+        if (!tab) continue;
+        const ok = await get().saveTab(id);
+        if (!ok) {
+          failed = tab.filename;
+          break;
+        }
+        saved += 1;
+      }
+    } finally {
+      saveAllRunning = false;
+    }
+
+    if (failed) {
+      toast.show(`Saved ${saved} file(s). ${failed} failed.`, {
+        type: "error",
+        duration: 5000,
+      });
+    } else {
+      toast.show(`Saved ${saved} file${saved === 1 ? "" : "s"}`, {
+        type: "success",
+        duration: 1500,
+      });
+    }
+    return { saved, failed };
+  },
+
+  reopenClosedTab: async () => {
+    const stack = get().closedTabs;
+    if (stack.length === 0) {
+      toast.show("No recently closed tabs", { type: "info", duration: 1200 });
+      return false;
+    }
+    const entry = stack[stack.length - 1];
+    set({ closedTabs: stack.slice(0, -1) });
+
+    if (entry.path) {
+      const existing = Object.values(get().tabs).find(
+        (tab) =>
+          tab.path && normalizePath(tab.path) === normalizePath(entry.path!),
+      );
+      if (existing) {
+        get().activate(existing.id);
+        return true;
+      }
+    }
+
+    let missing = false;
+    if (entry.path && !entry.modified) {
+      try {
+        const data = await api.openFileByPath(entry.path);
+        if (data && !data.error) {
+          get().createTab({
+            path: data.path ?? entry.path,
+            filename: data.filename ?? entry.filename,
+            content: data.content ?? entry.content,
+            modified: false,
+            cursorPos: Math.min(entry.cursorPos, data.content?.length ?? 0),
+            scrollTop: 0,
+            encoding: data.encoding ?? entry.encoding,
+            bom: data.bom ?? entry.bom,
+            lineEnding: data.line_ending ?? entry.lineEnding,
+            mixedLineEndings: data.mixed_line_endings ?? false,
+          });
+          toast.show(`Reopened ${entry.filename}`, {
+            type: "success",
+            duration: 1200,
+          });
+          return true;
+        }
+        missing = true;
+      } catch {
+        missing = true;
+      }
+    }
+
+    get().createTab({
+      ...entry,
+      id: undefined,
+      modified: entry.modified || !entry.path || missing,
+      isPreview: false,
+    });
+    toast.show(
+      entry.modified || !entry.path || missing
+        ? `Restored buffer for ${entry.filename}`
+        : `Reopened ${entry.filename}`,
+      { type: "info", duration: 1500 },
+    );
+    return true;
+  },
+
+  refreshRecent: async () => {
+    try {
+      const files = await api.getRecentFiles();
+      const seen = new Set<string>();
+      const unique: string[] = [];
+      for (const file of files ?? []) {
+        const key = normalizePath(file);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(file);
+      }
+      set({ recentFiles: unique });
+    } catch {
+      /* recent files are best-effort */
+    }
   },
 
   markModified: (id) => {
@@ -702,6 +1086,102 @@ export const useStore = create<AppStore>((set, get) => ({
         },
       },
     }));
+  },
+
+  beginSaveAs: async (id) => {
+    const state = get();
+    const tabId = id ?? state.activeId;
+    if (!tabId || state.saveAs) return false;
+    const tab = state.tabs[tabId];
+    if (!tab) return false;
+
+    const suggested = /\.[a-z0-9]{1,8}$/i.test(tab.filename)
+      ? tab.filename
+      : `${tab.filename}.md`;
+    const path = await pickSavePath(suggested);
+    if (!path) return false;
+
+    set({
+      saveAs: {
+        tabId,
+        path,
+        filename: basename(path),
+        encoding: tab.encoding,
+        bom: tab.bom,
+        lineEnding: tab.lineEnding,
+      },
+    });
+    return new Promise<boolean>((resolve) => {
+      saveAsResolve = resolve;
+    });
+  },
+
+  confirmSaveAs: async ({ encoding, bom, lineEnding }) => {
+    const state = get();
+    const pending = state.saveAs;
+    if (!pending) return false;
+    const tab = state.tabs[pending.tabId];
+    if (!tab) {
+      get().cancelSaveAs();
+      return false;
+    }
+
+    const content =
+      state.activeId === pending.tabId ? currentEditorContent() : tab.content;
+    try {
+      const result = await api.saveFileAs(
+        pending.path,
+        content,
+        encoding,
+        bom,
+        lineEnding,
+      );
+      if (!result?.success) {
+        toast.show(result?.message ?? result?.error ?? "Save failed", {
+          type: "error",
+        });
+        return false;
+      }
+
+      tabRevisions.set(
+        pending.tabId,
+        (tabRevisions.get(pending.tabId) ?? 0) + 1,
+      );
+      set((current) => ({
+        saveAs: null,
+        tabs: {
+          ...current.tabs,
+          [pending.tabId]: {
+            ...current.tabs[pending.tabId],
+            path: result.path ?? pending.path,
+            filename: basename(result.path ?? pending.path),
+            content,
+            modified: false,
+            mixedLineEndings: false,
+            encoding: result.encoding ?? encoding,
+            bom: result.bom ?? bom,
+            lineEnding: result.line_ending ?? lineEnding,
+          },
+        },
+      }));
+      settleSaveAs(true);
+      toast.show(`Saved ${basename(result.path ?? pending.path)}`, {
+        type: "success",
+        duration: 1500,
+      });
+      void get().refreshRecent();
+      await get().refreshTree();
+      return true;
+    } catch (error) {
+      toast.show(`Save failed: ${String(error)}`, { type: "error" });
+      return false;
+    }
+  },
+
+  cancelSaveAs: () => {
+    if (!get().saveAs) return;
+    set({ saveAs: null });
+    settleSaveAs(false);
   },
 
   snapshotActive: () => {
@@ -752,6 +1232,7 @@ export const useStore = create<AppStore>((set, get) => ({
         return;
       }
       get().openFileData(data, isPreview);
+      void get().refreshRecent();
     } catch (error) {
       toast.show(`Could not open file: ${String(error)}`, { type: "error" });
     }
@@ -1009,8 +1490,14 @@ export const useStore = create<AppStore>((set, get) => ({
   handleFsEvent: async (event) => {
     const state = get();
     if (event.type !== "modified") {
-      // Watcher batches can contain several paths; scan once.
-      scheduleTreeRefresh(() => get().refreshTree());
+      const patch = patchTreeEvent(state, event);
+      if (patch) {
+        set(patch);
+      } else {
+        // The event touched a branch that is not loaded; fall back to a
+        // scoped refresh (coalesced across watcher batches).
+        scheduleTreeRefresh(() => get().refreshTree());
+      }
     }
 
     if (event.type !== "modified" || event.is_directory) return;

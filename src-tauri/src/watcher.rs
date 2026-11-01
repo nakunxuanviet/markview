@@ -76,6 +76,26 @@ fn should_ignore(path: &Path) -> bool {
 }
 
 fn collect(event: Event, pending: &mut HashMap<(String, String), Value>) {
+    if matches!(
+        event.kind,
+        EventKind::Modify(notify::event::ModifyKind::Name(_))
+    ) && event.paths.len() >= 2
+    {
+        let old = &event.paths[0];
+        let new = &event.paths[1];
+        if should_ignore(old) && should_ignore(new) {
+            return;
+        }
+        let payload = json!({
+            "type": "moved",
+            "path": display_path(new),
+            "old_path": display_path(old),
+            "is_directory": new.is_dir(),
+        });
+        pending.insert(("moved".to_string(), display_path(new)), payload);
+        return;
+    }
+
     let kind = match event.kind {
         EventKind::Create(_) => "created",
         EventKind::Remove(_) => "deleted",

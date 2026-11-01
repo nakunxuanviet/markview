@@ -31,6 +31,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Verify version sources match the tag
+        run: node scripts/check-versions.mjs
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

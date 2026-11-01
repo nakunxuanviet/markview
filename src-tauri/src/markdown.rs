@@ -48,7 +48,7 @@ const ALLOWED_TAGS: &[&str] = &[
     "ul",
 ];
 
-const GLOBAL_ATTRS: &[&str] = &["class", "title", "id"];
+const GLOBAL_ATTRS: &[&str] = &["class", "title", "id", "data-sourcepos"];
 
 static BUILDER: OnceLock<ammonia::Builder<'static>> = OnceLock::new();
 
@@ -115,6 +115,8 @@ pub fn render(text: &str) -> Value {
     options.render.r#unsafe = true;
     // Parity with the Python app (nl2br): a single newline is a hard break.
     options.render.hardbreaks = true;
+    // `data-sourcepos` lets the preview map a task checkbox back to its line.
+    options.render.sourcepos = true;
 
     let html = comrak::markdown_to_html(text, &options);
     json!({ "html": sanitize(&html), "toc": "" })
@@ -141,7 +143,7 @@ mod tests {
     fn renders_tables() {
         let out = render("| a | b |\n|---|---|\n| 1 | 2 |");
         let html = out["html"].as_str().unwrap();
-        assert!(html.contains("<table>"));
+        assert!(html.contains("<table"));
     }
 
     #[test]

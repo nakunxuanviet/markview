@@ -1,52 +1,13 @@
-import { api, pickFile, pickSavePath } from "./api";
+import { api, pickFile } from "./api";
 import { editorRef } from "./editorRef";
 import { useStore } from "./store";
 import { toast } from "./toast";
 import { basename } from "./utils";
 
 export async function saveActiveAs(): Promise<void> {
-  const state = useStore.getState();
-  const tab = state.activeId ? state.tabs[state.activeId] : null;
-  if (!tab) return;
-  const content = editorRef.view
-    ? editorRef.view.state.doc.toString()
-    : tab.content;
-  const path = await pickSavePath(tab.filename);
-  if (!path) return;
-  try {
-    const result = await api.saveFileAs(
-      path,
-      content,
-      tab.encoding,
-      tab.bom,
-      tab.lineEnding,
-    );
-    if (result?.error) {
-      toast.show(result.message ?? result.error, { type: "error" });
-      return;
-    }
-    useStore.getState().touchTab(tab.id);
-    useStore.setState((current) => ({
-      tabs: {
-        ...current.tabs,
-        [tab.id]: {
-          ...current.tabs[tab.id],
-          path: result.path ?? path,
-          filename: basename(result.path ?? path),
-          content,
-          modified: false,
-          mixedLineEndings: false,
-          encoding: result.encoding ?? current.tabs[tab.id].encoding,
-          bom: result.bom ?? current.tabs[tab.id].bom,
-          lineEnding: result.line_ending ?? current.tabs[tab.id].lineEnding,
-        },
-      },
-    }));
-    toast.show(`Saved ${basename(path)}`, { type: "success", duration: 1500 });
-    await state.refreshTree();
-  } catch (error) {
-    toast.show(`Save failed: ${String(error)}`, { type: "error" });
-  }
+  const id = useStore.getState().activeId;
+  if (!id) return;
+  await useStore.getState().beginSaveAs(id);
 }
 
 export async function reloadAllFromDisk(): Promise<void> {

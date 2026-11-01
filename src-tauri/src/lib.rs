@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use percent_encoding::percent_decode_str;
+use serde_json::{json, Value};
 use tauri::http::Response;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WindowEvent};
 
 use state::AppState;
 
@@ -138,6 +139,45 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if !matches!(event, WindowEvent::CloseRequested { .. }) {
+                return;
+            }
+            let maximized = window.is_maximized().unwrap_or(false);
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let size = window
+                .outer_size()
+                .ok()
+                .map(|value| value.to_logical::<f64>(scale));
+            let position = window
+                .outer_position()
+                .ok()
+                .map(|value| value.to_logical::<f64>(scale));
+
+            let state = window.app_handle().state::<AppState>();
+            if let Ok(mut settings) = state.settings.lock() {
+                let mut config = settings
+                    .get("window")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                if !maximized {
+                    if let Some(size) = size {
+                        config.insert("width".into(), json!(size.width));
+                        config.insert("height".into(), json!(size.height));
+                    }
+                    if let Some(position) = position {
+                        config.insert("x".into(), json!(position.x));
+                        config.insert("y".into(), json!(position.y));
+                    }
+                }
+                config.insert("maximized".into(), json!(maximized));
+                settings.update(&json!({ "window": Value::Object(config) }));
+            };
+        })
         .register_asynchronous_uri_scheme_protocol("markview", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let uri_path = request.uri().path().to_string();
@@ -161,8 +201,16 @@ pub fn run() {
                 }
             }
 
-            // High-DPI displays can make the configured 1280x800 window larger
-            // than the screen; shrink it to the work area when that happens.
+            // Restore the previous window bounds, clamped to the current
+            // monitor so a disconnected display cannot hide the app.
+            let saved_window = {
+                let state = app.state::<AppState>();
+                state
+                    .settings
+                    .lock()
+                    .ok()
+                    .and_then(|settings| settings.get("window").cloned())
+            };
             if let Some(window) = app.get_webview_window("main") {
                 let monitor = window
                     .primary_monitor()
@@ -170,11 +218,54 @@ pub fn run() {
                     .flatten()
                     .or_else(|| window.current_monitor().ok().flatten());
                 if let Some(monitor) = monitor {
-                    let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
-                    let width = (size.width - 80.0).clamp(900.0, 1280.0);
-                    let height = (size.height - 140.0).clamp(560.0, 800.0);
+                    let scale = monitor.scale_factor();
+                    let monitor_size = monitor.size().to_logical::<f64>(scale);
+                    let monitor_pos = monitor.position().to_logical::<f64>(scale);
+                    let saved = saved_window.as_ref();
+                    let saved_number = |key: &str| {
+                        saved
+                            .and_then(|value| value.get(key))
+                            .and_then(Value::as_f64)
+                    };
+
+                    let max_width = (monitor_size.width - 40.0).max(800.0);
+                    let max_height = (monitor_size.height - 80.0).max(480.0);
+                    let width = saved_number("width")
+                        .unwrap_or((monitor_size.width - 80.0).clamp(900.0, 1280.0))
+                        .clamp(800.0, max_width);
+                    let height = saved_number("height")
+                        .unwrap_or((monitor_size.height - 140.0).clamp(560.0, 800.0))
+                        .clamp(480.0, max_height);
+
                     let _ = window.set_size(tauri::LogicalSize::new(width, height));
-                    let _ = window.center();
+
+                    let saved_x = saved_number("x");
+                    let saved_y = saved_number("y");
+                    let visible = match (saved_x, saved_y) {
+                        (Some(x), Some(y)) => {
+                            x > monitor_pos.x - width + 120.0
+                                && x < monitor_pos.x + monitor_size.width - 120.0
+                                && y > monitor_pos.y - height + 80.0
+                                && y < monitor_pos.y + monitor_size.height - 80.0
+                        }
+                        _ => false,
+                    };
+                    if visible {
+                        let _ = window.set_position(tauri::LogicalPosition::new(
+                            saved_x.unwrap_or(monitor_pos.x),
+                            saved_y.unwrap_or(monitor_pos.y),
+                        ));
+                    } else {
+                        let _ = window.center();
+                    }
+
+                    let maximized = saved
+                        .and_then(|value| value.get("maximized"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    if maximized {
+                        let _ = window.maximize();
+                    }
                 }
             }
             Ok(())
@@ -203,6 +294,7 @@ pub fn run() {
             commands::save_settings,
             commands::get_setting,
             commands::save_image,
+            commands::import_image,
             commands::reveal_in_explorer,
             commands::search_in_files,
             commands::cancel_search,

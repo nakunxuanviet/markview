@@ -70,6 +70,7 @@ export function PreviewPane({
   const scheduleRef = useRef<(doc: CodeMirrorText) => void>(() => undefined);
 
   const [html, setHtml] = useState("");
+  const [renderedTabId, setRenderedTabId] = useState<string | null>(null);
   const [inline, setInline] = useState<InlineEdit | null>(null);
   const [renderStatus, setRenderStatus] = useState<RenderStatus>("live");
   const [largeTier, setLargeTier] = useState<PreviewTier | null>(null);
@@ -134,6 +135,7 @@ export function PreviewPane({
       sourceRef.current = text;
       htmlRef.current = result?.html ?? "";
       setHtml(htmlRef.current);
+      setRenderedTabId(useStore.getState().activeId);
       setRenderStatus(previewTier(text.length) === "huge" ? "paused" : "live");
     } catch (error) {
       console.error("render failed", error);
@@ -261,6 +263,7 @@ export function PreviewPane({
         renderedTextRef.current = "";
         sourceRef.current = "";
         setHtml("");
+        setRenderedTabId(null);
       }
       setRenderStatus("paused");
       return;
@@ -286,6 +289,7 @@ export function PreviewPane({
         renderedTextRef.current = "";
         sourceRef.current = "";
         setHtml("");
+        setRenderedTabId(null);
       }
       return;
     }
@@ -578,10 +582,12 @@ export function PreviewPane({
       )}
       <div
         id="preview-content"
+        data-preview-tab={renderedTabId ?? ""}
         key={`${theme}:${previewFont}:${previewFontSize}`}
         ref={contentRef}
         onDoubleClick={onDoubleClick}
         onClick={(event) => {
+          if (handleTaskClick(event)) return;
           if (handleCopyClick(event)) return;
           handleLinkClick(event, tabPath);
         }}
@@ -662,7 +668,12 @@ function highlightCode(root: HTMLElement) {
 
 function processCheckboxes(root: HTMLElement) {
   root.querySelectorAll<HTMLLIElement>("li").forEach((li) => {
-    if (li.querySelector('input[type="checkbox"]')) {
+    const checkbox = li.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    if (checkbox) {
+      checkbox.disabled = false;
+      checkbox.removeAttribute("disabled");
       li.classList.add("task-list-item");
       return;
     }
@@ -733,6 +744,38 @@ function addCopyButtons(root: HTMLElement) {
     bar.append(label, button);
     wrapper.insertBefore(bar, pre);
   });
+}
+
+/** Toggle a Markdown task checkbox and write the change to the source. */
+function handleTaskClick(event: ReactMouseEvent<HTMLDivElement>): boolean {
+  const input = (event.target as HTMLElement).closest<HTMLInputElement>(
+    'input[type="checkbox"]',
+  );
+  if (!input) return false;
+  const item = input.closest<HTMLElement>("li[data-sourcepos]");
+  if (!item) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  const view = editorRef.view;
+  if (!view) return true;
+
+  const startLine = Number((item.dataset.sourcepos ?? "").split(":")[0]) - 1;
+  if (!Number.isFinite(startLine) || startLine < 0) return true;
+  if (startLine >= view.state.doc.lines) return true;
+
+  const line = view.state.doc.line(startLine + 1);
+  const next = line.text.replace(
+    /^(\s*(?:[-*+]|\d+\.)\s+\[)([ xX])(\])/,
+    (_match, prefix: string, mark: string, suffix: string) =>
+      `${prefix}${mark === " " ? "x" : " "}${suffix}`,
+  );
+  if (next === line.text) return true;
+
+  view.dispatch({
+    changes: { from: line.from, to: line.to, insert: next },
+  });
+  view.focus();
+  return true;
 }
 
 /** Returns true when the click targeted a copy button. */

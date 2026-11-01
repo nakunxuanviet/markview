@@ -38,7 +38,23 @@ export function CommandPalette() {
         run: () => store.openFolder(),
       },
       { label: "Save", shortcut: "Ctrl+S", run: () => store.saveActive() },
+      { label: "Save All", shortcut: "Ctrl+Alt+S", run: () => store.saveAll() },
       { label: "Save As...", shortcut: "Ctrl+Shift+S", run: saveActiveAs },
+      {
+        label: "Reopen Closed Tab",
+        shortcut: "Ctrl+Shift+T",
+        run: () => store.reopenClosedTab(),
+      },
+      {
+        label: "Open Recent File...",
+        shortcut: "Ctrl+R",
+        run: () => setState({ quickOpenOpen: true, quickOpenMode: "recent" }),
+      },
+      {
+        label: "Export...",
+        shortcut: "Ctrl+Shift+E",
+        run: () => setState({ exportOpen: true }),
+      },
       {
         label: "Close Tab",
         shortcut: "Ctrl+W",
@@ -63,7 +79,7 @@ export function CommandPalette() {
       {
         label: "Quick Open File",
         shortcut: "Ctrl+P",
-        run: () => setState({ quickOpenOpen: true }),
+        run: () => setState({ quickOpenOpen: true, quickOpenMode: "files" }),
       },
       {
         label: "Toggle Sidebar",

@@ -128,6 +128,8 @@ export const api = {
   // Images
   saveImage: (destFolder: string, filename: string, base64Data: string) =>
     invoke<OpResult>("save_image", { destFolder, filename, base64Data }),
+  importImage: (source: string, folder: string) =>
+    invoke<OpResult>("import_image", { source, folder }),
 
   // Misc
   revealInExplorer: (path: string) =>

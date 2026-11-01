@@ -404,6 +404,55 @@ pub fn save_image(
     }
 }
 
+/// Copy a dropped image into the active document's `assets/` folder.
+#[tauri::command]
+pub fn import_image(state: State<'_, AppState>, source: String, folder: String) -> Value {
+    let from = PathBuf::from(&source);
+    if !from.is_file() {
+        return err("Image not found");
+    }
+    let ext = from
+        .extension()
+        .map(|value| format!(".{}", value.to_string_lossy().to_lowercase()))
+        .unwrap_or_default();
+    if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        return err("Unsupported image type");
+    }
+    let Ok(meta) = std::fs::metadata(&from) else {
+        return err("Image not found");
+    };
+    if meta.len() as usize > MAX_IMAGE_BYTES {
+        return err("Image is too large");
+    }
+    let Some(dest) = validate_path(&state, &folder, false, false, true, false) else {
+        return err("Invalid destination folder");
+    };
+    if std::fs::create_dir_all(&dest).is_err() {
+        return err("Could not create the assets folder");
+    }
+
+    let stem = from
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "image".to_string());
+    let mut name = format!("{stem}{ext}");
+    let mut target = dest.join(&name);
+    let mut counter = 1;
+    while target.exists() {
+        counter += 1;
+        name = format!("{stem} ({counter}){ext}");
+        target = dest.join(&name);
+    }
+    match std::fs::copy(&from, &target) {
+        Ok(_) => json!({
+            "success": true,
+            "path": display_path(&target),
+            "name": name,
+        }),
+        Err(e) => err(e.to_string()),
+    }
+}
+
 // === REVEAL ===
 
 #[tauri::command]

@@ -62,6 +62,7 @@ export function EditorPane() {
   const indentOnInputCompartment = useRef(new Compartment());
   const indentUnitCompartment = useRef(new Compartment());
   const foldGutterCompartment = useRef(new Compartment());
+  const spellcheckCompartment = useRef(new Compartment());
 
   const statsRef = useRef({ words: 0, bytes: 0 });
   const statusFrame = useRef<number | undefined>(undefined);
@@ -90,6 +91,7 @@ export function EditorPane() {
   );
   const insertSpaces = useStore((state) => state.settings.editor.insert_spaces);
   const codeFolding = useStore((state) => state.settings.editor.code_folding);
+  const spellcheck = useStore((state) => state.settings.editor.spellcheck);
 
   const dispatchStatus = useCallback((view: EditorView) => {
     const head = view.state.selection.main.head;
@@ -186,6 +188,11 @@ export function EditorPane() {
           foldGutterCompartment.current.of(
             settings.settings.editor.code_folding ? foldGutter() : [],
           ),
+          spellcheckCompartment.current.of(
+            settings.settings.editor.spellcheck
+              ? EditorView.contentAttributes.of({ spellcheck: "true" })
+              : [],
+          ),
           highlightSpecialChars(),
           history(),
           drawSelection(),
@@ -271,6 +278,11 @@ export function EditorPane() {
         ),
         foldGutterCompartment.current.reconfigure(
           state.settings.editor.code_folding ? foldGutter() : [],
+        ),
+        spellcheckCompartment.current.reconfigure(
+          state.settings.editor.spellcheck
+            ? EditorView.contentAttributes.of({ spellcheck: "true" })
+            : [],
         ),
       ],
     });
@@ -480,6 +492,7 @@ export function EditorPane() {
     highlightActiveLineSetting,
     insertSpaces,
     codeFolding,
+    spellcheck,
     applyCompartments,
     rememberState,
   ]);

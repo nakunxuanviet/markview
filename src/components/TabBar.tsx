@@ -101,6 +101,17 @@ export function TabBar() {
       },
       { separator: true },
       {
+        label: "Save All",
+        shortcut: "Ctrl+Alt+S",
+        action: () => void store.saveAll(),
+      },
+      {
+        label: "Reopen Closed Tab",
+        shortcut: "Ctrl+Shift+T",
+        action: () => void store.reopenClosedTab(),
+      },
+      { separator: true },
+      {
         label: "Copy Path",
         action: () => {
           const path = useStore.getState().tabs[id]?.path;

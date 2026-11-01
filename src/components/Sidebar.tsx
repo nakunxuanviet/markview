@@ -9,6 +9,7 @@ import {
   IconApp,
   IconAppLight,
   IconChevronRight,
+  IconFile,
   IconFolder,
   IconLayers,
   IconRefresh,
@@ -81,6 +82,7 @@ export function Sidebar() {
   const expanded = useStore((state) => state.expanded);
   const showWelcome = useStore((state) => state.showWelcome);
   const recentFolders = useStore((state) => state.recentFolders);
+  const recentFiles = useStore((state) => state.recentFiles);
   const activeTabPath = useStore((state) =>
     state.activeId ? (state.tabs[state.activeId]?.path ?? null) : null,
   );
@@ -263,7 +265,7 @@ export function Sidebar() {
         {recentFolders.length > 0 && (
           <div className="welcome-recent">
             <div className="welcome-sec-head">
-              <span>Recent</span>
+              <span>Recent folders</span>
               <span className="welcome-sec-line" />
             </div>
             <div id="recent-folders-list">
@@ -285,6 +287,50 @@ export function Sidebar() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {recentFiles.length > 0 && (
+          <div className="welcome-recent">
+            <div className="welcome-sec-head">
+              <span>Recent files</span>
+              <span className="welcome-sec-line" />
+            </div>
+            <div id="recent-files-list">
+              {recentFiles.slice(0, 8).map((file) => (
+                <div
+                  className="recent-item"
+                  key={file}
+                  title={file}
+                  onClick={() => void store.openPath(file, false)}
+                >
+                  <span className="recent-icon">
+                    <IconFile />
+                  </span>
+                  <span className="recent-body">
+                    <span className="recent-name">{basename(file)}</span>
+                    <span className="recent-path">
+                      {relativeTo(workspace ?? "", file)}
+                    </span>
+                  </span>
+                  <IconChevronRight className="recent-go" />
+                </div>
+              ))}
+            </div>
+            {recentFiles.length > 8 && (
+              <button
+                type="button"
+                className="recent-more"
+                onClick={() =>
+                  useStore.setState({
+                    quickOpenOpen: true,
+                    quickOpenMode: "recent",
+                  })
+                }
+              >
+                Show all recent files…
+              </button>
+            )}
           </div>
         )}
 

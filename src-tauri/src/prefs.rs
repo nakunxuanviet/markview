@@ -16,11 +16,9 @@ pub fn default_settings() -> Value {
             "sidebar_width": 250,
             "sidebar_visible": true,
             "preview_visible": true,
-            "preview_position": "right",
             "show_toolbar": true,
             "show_statusbar": true,
-            "show_line_numbers": true,
-            "show_minimap": false
+            "show_line_numbers": true
         },
         "editor": {
             "word_wrap": true,
@@ -30,7 +28,8 @@ pub fn default_settings() -> Value {
             "auto_indent": true,
             "highlight_active_line": true,
             "match_brackets": true,
-            "code_folding": false
+            "code_folding": false,
+            "spellcheck": false
         },
         "files": {
             "auto_save": false,
@@ -39,29 +38,46 @@ pub fn default_settings() -> Value {
             "default_line_ending": "lf",
             "visible_extensions": [".md", ".markdown", ".mdx", ".txt", ".xlsx", ".xls", ".docx", ".doc", ".pdf", ".pptx", ".csv"],
             "show_hidden_files": false,
-            "sort_by": "name_asc",
             "folders_first": true,
             "folder_label_segments": 2,
             "exclude_patterns": ["node_modules", ".git", "__pycache__", ".DS_Store"]
         },
         "session": {
             "restore_session": true,
-            "backup_interval": 10,
-            "remember_folder": true
+            "backup_interval": 10
         },
         "preview": {
             "scroll_sync": true,
             "render_mermaid": true,
             "render_math": true,
-            "double_click_preview": true,
-            "code_theme": "github-dark"
+            "double_click_preview": true
         },
         "recent_files": [],
         "recent_folders": [],
-        "pinned_folders": [],
-        "language": "en",
         "window": { "width": 1280, "height": 800, "x": 100, "y": 50, "maximized": false }
     })
+}
+
+/// Drop settings that no longer have UI or behavior. Leaving them in
+/// settings.json would make `deep_merge` resurrect them on every launch.
+fn remove_obsolete(value: &mut Value) -> bool {
+    let mut changed = false;
+    if let Some(object) = value.as_object_mut() {
+        for (section, key) in [
+            ("appearance", "preview_position"),
+            ("appearance", "show_minimap"),
+            ("files", "sort_by"),
+            ("preview", "code_theme"),
+            ("session", "remember_folder"),
+        ] {
+            if let Some(section) = object.get_mut(section).and_then(Value::as_object_mut) {
+                changed |= section.remove(key).is_some();
+            }
+        }
+        changed |= object.remove("language").is_some();
+        changed |= object.remove("pinned_folders").is_some();
+    }
+    changed
 }
 
 pub fn deep_merge(base: &mut Value, overrides: &Value) {
@@ -104,7 +120,12 @@ impl SettingsStore {
                 deep_merge(&mut value, &parsed);
             }
         }
-        Self { path, value }
+        let cleaned = remove_obsolete(&mut value);
+        let store = Self { path, value };
+        if cleaned {
+            store.save();
+        }
+        store
     }
 
     pub fn all(&self) -> Value {
@@ -163,6 +184,10 @@ impl SettingsStore {
     }
 }
 
+fn recent_key(path: &str) -> String {
+    path.replace('\\', "/").to_lowercase()
+}
+
 fn add_recent(value: &mut Value, key: &str, path: &str, cap: usize) {
     let Some(obj) = value.as_object_mut() else {
         return;
@@ -173,7 +198,8 @@ fn add_recent(value: &mut Value, key: &str, path: &str, cap: usize) {
     let Some(arr) = entry.as_array_mut() else {
         return;
     };
-    arr.retain(|v| v.as_str() != Some(path));
+    let key = recent_key(path);
+    arr.retain(|v| v.as_str().map(recent_key).as_deref() != Some(key.as_str()));
     arr.insert(0, Value::String(path.to_string()));
     arr.truncate(cap);
 }

@@ -9,10 +9,12 @@ import { ContextMenu } from "./components/ContextMenu";
 import { DiffDialog } from "./components/DiffDialog";
 import { EditorPane } from "./components/EditorPane";
 import { EmptyState } from "./components/EmptyState";
+import { ExportDialog } from "./components/ExportDialog";
 import { FindBar } from "./components/FindBar";
 import { PreviewPane } from "./components/PreviewPane";
 import { PromptDialog } from "./components/PromptDialog";
 import { QuickOpen } from "./components/QuickOpen";
+import { SaveAsDialog } from "./components/SaveAsDialog";
 import { SearchInFiles } from "./components/SearchInFiles";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -25,6 +27,8 @@ import { editorRef } from "./editorRef";
 import { setScrollSyncEnabled } from "./scrollSync";
 import { useStore } from "./store";
 import { applyAppearance, applyTheme } from "./theme";
+import { toast } from "./toast";
+import { dirname } from "./utils";
 import type { FsEvent } from "./types";
 import { checkForUpdates } from "./updater";
 
@@ -303,7 +307,7 @@ export function App() {
             useStore.setState({ dragOver: false });
           } else if (payload.type === "drop") {
             useStore.setState({ dragOver: false });
-            void handleDroppedPaths(payload.paths);
+            void handleDroppedPaths(payload.paths, payload.position);
           }
         });
         if (disposed) stop();
@@ -410,6 +414,24 @@ export function App() {
         return;
       }
 
+      if (event.shiftKey && key === "t") {
+        consume();
+        void state.reopenClosedTab();
+        return;
+      }
+
+      if (event.shiftKey && key === "e") {
+        consume();
+        useStore.setState({ exportOpen: true });
+        return;
+      }
+
+      if (event.altKey && key === "s") {
+        consume();
+        void state.saveAll();
+        return;
+      }
+
       switch (key) {
         case "n":
           consume();
@@ -429,7 +451,11 @@ export function App() {
           return;
         case "p":
           consume();
-          useStore.setState({ quickOpenOpen: true });
+          useStore.setState({ quickOpenOpen: true, quickOpenMode: "files" });
+          return;
+        case "r":
+          consume();
+          useStore.setState({ quickOpenOpen: true, quickOpenMode: "recent" });
           return;
         case "f":
           consume();
@@ -588,6 +614,8 @@ export function App() {
       ))}
 
       <QuickOpen />
+      <SaveAsDialog />
+      <ExportDialog />
       <CommandPalette />
       <SearchInFiles />
       <SettingsDialog />
@@ -599,9 +627,28 @@ export function App() {
   );
 }
 
-async function handleDroppedPaths(paths: string[]): Promise<void> {
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)$/i;
+
+async function handleDroppedPaths(
+  paths: string[],
+  position?: { x: number; y: number },
+): Promise<void> {
   const store = useStore.getState();
   if (!paths.length) return;
+
+  if (position) {
+    const scale = window.devicePixelRatio || 1;
+    const target = document.elementFromPoint(
+      position.x / scale,
+      position.y / scale,
+    );
+    const overEditor = !!target?.closest("#editor-panel");
+    const images = paths.filter((path) => IMAGE_EXTENSIONS.test(path));
+    if (overEditor && images.length > 0) {
+      await insertDroppedImages(images);
+      return;
+    }
+  }
 
   if (paths.length === 1) {
     const kind = await api.pathKind(paths[0]).catch(() => "missing");
@@ -618,5 +665,40 @@ async function handleDroppedPaths(paths: string[]): Promise<void> {
   for (const path of paths) {
     const kind = await api.pathKind(path).catch(() => "missing");
     if (kind === "file") await store.openPath(path, false);
+  }
+}
+
+async function insertDroppedImages(paths: string[]): Promise<void> {
+  const store = useStore.getState();
+  const tab = store.activeId ? store.tabs[store.activeId] : null;
+  if (!tab?.path) {
+    toast.show("Save the file first before inserting images.", {
+      type: "warn",
+    });
+    return;
+  }
+
+  const folder = `${dirname(tab.path)}/assets`;
+  const snippets: string[] = [];
+  for (const source of paths.slice(0, 10)) {
+    try {
+      const result = await api.importImage(source, folder);
+      if (result?.error || !result?.name) {
+        toast.show(result?.error ?? "Could not import image", {
+          type: "error",
+        });
+        continue;
+      }
+      snippets.push(`![${result.name}](assets/${result.name})`);
+    } catch (error) {
+      toast.show(`Image import failed: ${String(error)}`, { type: "error" });
+    }
+  }
+  if (snippets.length > 0) {
+    editorRef.insertText?.(`${snippets.join("\n\n")}\n`);
+    toast.show(
+      `Inserted ${snippets.length} image${snippets.length === 1 ? "" : "s"}`,
+      { type: "success", duration: 1500 },
+    );
   }
 }

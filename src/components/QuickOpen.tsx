@@ -4,11 +4,13 @@ import { api } from "../api";
 import { IconSearch } from "../icons";
 import { useStore } from "../store";
 import type { FileHit } from "../types";
-import { relativeTo } from "../utils";
+import { basename, relativeTo } from "../utils";
 
 export function QuickOpen() {
   const open = useStore((state) => state.quickOpenOpen);
   const workspace = useStore((state) => state.workspace);
+  const mode = useStore((state) => state.quickOpenMode);
+  const recentFiles = useStore((state) => state.recentFiles);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FileHit[]>([]);
   const [selected, setSelected] = useState(0);
@@ -26,6 +28,26 @@ export function QuickOpen() {
   useEffect(() => {
     if (!open) return;
     if (timer.current) window.clearTimeout(timer.current);
+
+    if (mode === "recent") {
+      const needle = query.trim().toLowerCase();
+      const hits = recentFiles
+        .map((path) => ({
+          name: basename(path),
+          path,
+          relative: relativeTo(workspace ?? "", path),
+        }))
+        .filter(
+          (hit) =>
+            !needle ||
+            hit.name.toLowerCase().includes(needle) ||
+            hit.relative.toLowerCase().includes(needle),
+        );
+      setResults(hits);
+      setSelected(0);
+      return;
+    }
+
     if (!query.trim()) {
       setResults([]);
       return;
@@ -42,7 +64,7 @@ export function QuickOpen() {
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [query, open]);
+  }, [query, open, mode, recentFiles, workspace]);
 
   if (!open) return null;
 
@@ -65,7 +87,9 @@ export function QuickOpen() {
             ref={inputRef}
             type="text"
             id="quick-open-input"
-            placeholder="Search files by name"
+            placeholder={
+              mode === "recent" ? "Search recent files" : "Search files by name"
+            }
             autoComplete="off"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -96,11 +120,17 @@ export function QuickOpen() {
               onClick={() => choose(hit)}
             >
               <span className="qo-name">{hit.name}</span>
-              <span className="qo-path">{relativeTo(workspace ?? "", hit.path)}</span>
+              <span className="qo-path">
+                {relativeTo(workspace ?? "", hit.path)}
+              </span>
             </div>
           ))}
           {query.trim() && results.length === 0 && (
-            <div className="sif-empty">No matching files</div>
+            <div className="sif-empty">
+              {mode === "recent"
+                ? "No recent files match"
+                : "No matching files"}
+            </div>
           )}
         </div>
         <div className="dialog-hint">

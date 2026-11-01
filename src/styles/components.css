@@ -849,7 +849,8 @@
   gap: 1px;
 }
 
-#recent-folders-list .recent-item {
+#recent-folders-list .recent-item,
+#recent-files-list .recent-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -860,8 +861,26 @@
   cursor: pointer;
 }
 
-#recent-folders-list .recent-item:hover {
+#recent-folders-list .recent-item:hover,
+#recent-files-list .recent-item:hover {
   background: var(--bg-hover);
+}
+
+.recent-more {
+  width: 100%;
+  margin-top: 3px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: left;
+}
+
+.recent-more:hover {
+  background: var(--bg-hover);
+  color: var(--text-accent);
 }
 
 .recent-icon {
@@ -913,7 +932,8 @@
   opacity: 0;
 }
 
-#recent-folders-list .recent-item:hover .recent-go {
+#recent-folders-list .recent-item:hover .recent-go,
+#recent-files-list .recent-item:hover .recent-go {
   opacity: 1;
 }
 
@@ -1689,7 +1709,11 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--bg-input);
-  cursor: default;
+  cursor: pointer;
+}
+
+#preview-content .task-list-item:hover input[type="checkbox"] {
+  border-color: var(--border-active);
 }
 
 #preview-content input[type="checkbox"]:checked {
@@ -2273,7 +2297,8 @@ body[data-theme="light"] #btn-welcome-open {
 
 body[data-theme="light"] .mv-kbd,
 body[data-theme="light"] .empty-row,
-body[data-theme="light"] #recent-folders-list .recent-item {
+body[data-theme="light"] #recent-folders-list .recent-item,
+body[data-theme="light"] #recent-files-list .recent-item {
   border-radius: 2px;
 }
 

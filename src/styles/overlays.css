@@ -1441,6 +1441,194 @@ body[data-theme="light"] .mv-modal-title {
   font-weight: 500;
 }
 
+.save-as-card {
+  width: min(560px, 100%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+
+.save-as-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.save-as-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.save-as-head p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.save-as-close {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.save-as-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.save-as-body {
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+.save-as-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.save-as-field > label {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.save-as-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.save-as-path .mono {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 9px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.save-as-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .save-as-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.save-as-eol {
+  display: flex;
+  gap: 2px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+
+.save-as-eol button {
+  flex: 1;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.save-as-eol button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.save-as-eol button.on {
+  background: var(--bg-active);
+  color: var(--text-accent);
+}
+
+.save-as-bom {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.save-as-bom input {
+  margin-top: 2px;
+  accent-color: var(--accent-color);
+}
+
+.save-as-bom b {
+  display: block;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.save-as-bom small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.save-as-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.save-as-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+body[data-theme="light"] .save-as-card {
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+body[data-theme="light"] .save-as-foot {
+  background: var(--bg-secondary);
+}
+
 /* --------------------------------------------------------------------------
    Toasts
    -------------------------------------------------------------------------- */

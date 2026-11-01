@@ -80,6 +80,7 @@ export interface FileHit {
 export interface FsEvent {
   type: "created" | "modified" | "deleted" | "moved";
   path: string;
+  old_path?: string;
   is_directory: boolean;
 }
 
@@ -107,11 +108,9 @@ export interface AppearanceSettings {
   sidebar_width: number;
   sidebar_visible: boolean;
   preview_visible: boolean;
-  preview_position: string;
   show_toolbar: boolean;
   show_statusbar: boolean;
   show_line_numbers: boolean;
-  show_minimap: boolean;
 }
 
 export interface EditorSettings {
@@ -123,6 +122,7 @@ export interface EditorSettings {
   highlight_active_line: boolean;
   match_brackets: boolean;
   code_folding: boolean;
+  spellcheck: boolean;
 }
 
 export interface FilesSettings {
@@ -132,7 +132,6 @@ export interface FilesSettings {
   default_line_ending: string;
   visible_extensions: string[];
   show_hidden_files: boolean;
-  sort_by: string;
   folders_first: boolean;
   folder_label_segments: number;
   exclude_patterns: string[];
@@ -141,7 +140,6 @@ export interface FilesSettings {
 export interface SessionSettings {
   restore_session: boolean;
   backup_interval: number;
-  remember_folder: boolean;
 }
 
 export interface PreviewSettings {
@@ -149,7 +147,6 @@ export interface PreviewSettings {
   render_mermaid: boolean;
   render_math: boolean;
   double_click_preview: boolean;
-  code_theme: string;
 }
 
 export interface AppSettings {
@@ -160,7 +157,6 @@ export interface AppSettings {
   session: SessionSettings;
   recent_files: string[];
   recent_folders: string[];
-  language: string;
   [key: string]: unknown;
 }
 

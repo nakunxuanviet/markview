@@ -403,6 +403,16 @@ export function SettingsDialog() {
                 }
               />
             </div>
+            <div className="setting-row">
+              <label>Check spelling while typing</label>
+              <input
+                type="checkbox"
+                checked={settings.editor.spellcheck}
+                onChange={(event) =>
+                  update({ editor: { spellcheck: event.target.checked } })
+                }
+              />
+            </div>
           </div>
 
           <div className="settings-section">

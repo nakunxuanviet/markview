@@ -17,8 +17,10 @@ It ships as a single native binary with no Python runtime and no sidecar process
 - Zen mode, adjustable sidebar/preview split, and a native title bar that follows the theme
 - Find & replace (regex, case, whole word), search across files, quick open
 - Command palette, outline, diff view ("Compare with Saved" / "Compare with File...")
-- Native file watcher with reload banners, image paste into `assets/`, drag & drop
-- Auto-backup & crash recovery
+- Native file watcher with reload banners, image paste/drop into `assets/`, drag & drop
+- Export a self-contained HTML file, or print / save as PDF through the system dialog
+- Save All, reopen closed tabs, recent files, clickable task checkboxes, spellcheck
+- Remembers window position/size; auto-backup & crash recovery
 
 ## Requirements
 
@@ -129,6 +131,10 @@ settings carry over):
 | Ctrl+Shift+O    | Open folder          |
 | Ctrl+S          | Save                 |
 | Ctrl+Shift+S    | Save as              |
+| Ctrl+Alt+S      | Save all             |
+| Ctrl+Shift+T    | Reopen closed tab    |
+| Ctrl+Shift+E    | Export HTML / print  |
+| Ctrl+R          | Open recent file     |
 | Ctrl+W          | Close tab            |
 | Ctrl+Shift+W    | Close all tabs       |
 | Ctrl+F          | Find                 |

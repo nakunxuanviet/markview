@@ -180,7 +180,7 @@ pub fn remember_file(state: &AppState, path: &Path) {
         capped_insert(&mut files, real, MAX_TRUSTED_FILES);
     }
     if let Ok(mut settings) = state.settings.lock() {
-        settings.add_recent_file(&path.to_string_lossy());
+        settings.add_recent_file(&display_path(path));
     }
 }
 
@@ -190,7 +190,7 @@ pub fn remember_folder(state: &AppState, path: &Path) {
         capped_insert(&mut folders, real, MAX_TRUSTED_FOLDERS);
     }
     if let Ok(mut settings) = state.settings.lock() {
-        settings.add_recent_folder(&path.to_string_lossy());
+        settings.add_recent_folder(&display_path(path));
     }
 }
 
