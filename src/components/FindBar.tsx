@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorView } from "@codemirror/view";
+import type { Text } from "@codemirror/state";
 
 import { editorBus } from "../editorBus";
 import { editorRef } from "../editorRef";
@@ -51,11 +52,21 @@ export function FindBar() {
   const matches = useRef<Match[]>([]);
   const previewMatches = useRef<Range[]>([]);
   const current = useRef(-1);
+  const searchedDoc = useRef<Text | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const buildRegex = useCallback((): RegExp | null => {
     if (!query) return null;
     if (useRegex && query.length > 200) return null;
+    // Catastrophic backtracking is the one thing the JS regex engine cannot
+    // cancel once it starts. Reject the common nested-quantifier and
+    // backreference shapes before they can freeze the editor.
+    if (
+      useRegex &&
+      (/\([^)]*[?+*][^)]*\)[?+*{]/.test(query) || /\\[1-9]/.test(query))
+    ) {
+      return null;
+    }
     let pattern = useRegex ? query : escapeRegExp(query);
     if (wholeWord) pattern = `\\b${pattern}\\b`;
     try {
@@ -158,12 +169,14 @@ export function FindBar() {
       const view = editorRef.view;
       if (!view || !query) {
         matches.current = [];
+        searchedDoc.current = null;
         setStatus("");
         return;
       }
       const regex = buildRegex();
       if (!regex) {
         matches.current = [];
+        searchedDoc.current = null;
         setStatus("Invalid regex");
         return;
       }
@@ -180,6 +193,7 @@ export function FindBar() {
         if (found.length >= MAX_MATCHES) break;
       }
       matches.current = found;
+      searchedDoc.current = view.state.doc;
       if (!keepIndex) current.current = found.length ? 0 : -1;
       setStatus(
         found.length
@@ -228,6 +242,10 @@ export function FindBar() {
     const view = editorRef.view;
     const target = matches.current[current.current];
     if (!view || !target) return;
+    if (searchedDoc.current && !view.state.doc.eq(searchedDoc.current)) {
+      runSearch(true);
+      return;
+    }
     view.dispatch({
       changes: { from: target.from, to: target.to, insert: replacement },
       selection: { anchor: target.from + replacement.length },
@@ -238,6 +256,10 @@ export function FindBar() {
   const replaceAll = useCallback(() => {
     const view = editorRef.view;
     if (!view || matches.current.length === 0) return;
+    if (searchedDoc.current && !view.state.doc.eq(searchedDoc.current)) {
+      runSearch();
+      return;
+    }
     const changes = matches.current.map((match) => ({
       from: match.from,
       to: match.to,

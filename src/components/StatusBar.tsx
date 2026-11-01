@@ -215,8 +215,8 @@ export function StatusBar() {
                 </button>
               ))}
               <div className="status-format-note">
-                File mới dùng mặc định trong Settings. File đã có giữ kiểu gốc
-                cho tới khi bạn đổi.
+                New files use the defaults from Settings. Existing files keep
+                their original format until you change it.
               </div>
             </div>
           )}

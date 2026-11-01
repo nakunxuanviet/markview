@@ -9,8 +9,13 @@ import "./styles/overlays.css";
 import "./styles/theme-dark.css";
 
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const container = document.getElementById("root");
 if (container) {
-  createRoot(container).render(<App />);
+  createRoot(container).render(
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>,
+  );
 }

@@ -25,6 +25,7 @@ import {
 } from "../previewConfig";
 import { registerPreviewScroller } from "../scrollSync";
 import { useStore } from "../store";
+import { toast } from "../toast";
 import { formatSize, resolveRelative } from "../utils";
 
 interface InlineEdit {
@@ -44,6 +45,16 @@ let mermaidLoader: Promise<typeof import("mermaid").default> | null = null;
 function loadMermaid(): Promise<typeof import("mermaid").default> {
   mermaidLoader ??= import("mermaid").then((module) => module.default);
   return mermaidLoader;
+}
+
+/** Identity of the document that a preview DOM belongs to. It includes the
+ * tab path so two files with identical text in different folders do not share
+ * stale relative images or an export snapshot. */
+function documentKey(tabId: string | null, path: string | null, text: string) {
+  return previewCacheKey(
+    "doc",
+    `${tabId ?? ""}\u0000${path ?? ""}\u0000${text}`,
+  );
 }
 
 export function PreviewPane({
@@ -71,6 +82,9 @@ export function PreviewPane({
 
   const [html, setHtml] = useState("");
   const [renderedTabId, setRenderedTabId] = useState<string | null>(null);
+  const [rendered, setRendered] = useState(false);
+  const [renderedKey, setRenderedKey] = useState("");
+  const renderedKeyRef = useRef("");
   const [inline, setInline] = useState<InlineEdit | null>(null);
   const [renderStatus, setRenderStatus] = useState<RenderStatus>("live");
   const [largeTier, setLargeTier] = useState<PreviewTier | null>(null);
@@ -119,8 +133,19 @@ export function PreviewPane({
     if (!doc) return;
 
     const text = doc.toString();
-    if (text === renderedTextRef.current) {
+    const store = useStore.getState();
+    const activeTabId = store.activeId;
+    const activePath = activeTabId
+      ? (store.tabs[activeTabId]?.path ?? null)
+      : null;
+    const key = documentKey(activeTabId, activePath, text);
+    if (text === renderedTextRef.current && key === renderedKeyRef.current) {
       pendingRef.current = false;
+      // An empty document renders to an empty HTML string; mark it as
+      // rendered so export does not mistake it for a pending placeholder.
+      setRendered(true);
+      setRenderedTabId(activeTabId);
+      setRenderedKey(key);
       setRenderStatus(previewTier(text.length) === "huge" ? "paused" : "live");
       return;
     }
@@ -134,11 +159,17 @@ export function PreviewPane({
       renderedTextRef.current = text;
       sourceRef.current = text;
       htmlRef.current = result?.html ?? "";
+      renderedKeyRef.current = key;
       setHtml(htmlRef.current);
-      setRenderedTabId(useStore.getState().activeId);
+      setRendered(true);
+      setRenderedTabId(activeTabId);
+      setRenderedKey(key);
       setRenderStatus(previewTier(text.length) === "huge" ? "paused" : "live");
     } catch (error) {
       console.error("render failed", error);
+      renderedKeyRef.current = "";
+      setRendered(false);
+      setRenderedKey("");
       setRenderStatus("paused");
     } finally {
       renderingRef.current = false;
@@ -176,6 +207,10 @@ export function PreviewPane({
           renderedTextRef.current = "";
           sourceRef.current = "";
           setHtml("");
+          setRendered(false);
+          setRenderedKey("");
+          renderedKeyRef.current = "";
+          setRenderedTabId(null);
         }
         tierRef.current = tier;
         pendingRef.current = true;
@@ -263,6 +298,9 @@ export function PreviewPane({
         renderedTextRef.current = "";
         sourceRef.current = "";
         setHtml("");
+        setRendered(false);
+        setRenderedKey("");
+        renderedKeyRef.current = "";
         setRenderedTabId(null);
       }
       setRenderStatus("paused");
@@ -289,6 +327,9 @@ export function PreviewPane({
         renderedTextRef.current = "";
         sourceRef.current = "";
         setHtml("");
+        setRendered(false);
+        setRenderedKey("");
+        renderedKeyRef.current = "";
         setRenderedTabId(null);
       }
       return;
@@ -489,7 +530,17 @@ export function PreviewPane({
         "#preview-content p, #preview-content h1, #preview-content h2, #preview-content h3, #preview-content h4, #preview-content h5, #preview-content h6, #preview-content li, #preview-content blockquote, #preview-content pre, #preview-content td",
       );
       if (!block || !editorRef.view) return;
-      const range = findSourceRange(sourceRef.current, block);
+      let range: { start: number; end: number } | null = null;
+      const sourcepos = block.dataset.sourcepos;
+      if (sourcepos) {
+        const match = /^(\d+):\d+-(\d+):/.exec(sourcepos);
+        if (match) {
+          const start = Number(match[1]) - 1;
+          const end = Number(match[2]) - 1;
+          if (start >= 0 && end >= start) range = { start, end };
+        }
+      }
+      if (!range) range = findSourceRange(sourceRef.current, block);
       if (!range) return;
 
       const rect = block.getBoundingClientRect();
@@ -583,6 +634,11 @@ export function PreviewPane({
       <div
         id="preview-content"
         data-preview-tab={renderedTabId ?? ""}
+        data-preview-rendered={rendered ? "true" : "false"}
+        data-preview-disabled={
+          largeTier === "huge" && !rendered ? "true" : "false"
+        }
+        data-preview-source={renderedKey}
         key={`${theme}:${previewFont}:${previewFontSize}`}
         ref={contentRef}
         onDoubleClick={onDoubleClick}
@@ -596,7 +652,9 @@ export function PreviewPane({
             html ||
             (largeTier === "huge"
               ? '<p style="color:var(--text-muted)">Preview is disabled for this large document. Use “Render preview” to build it once.</p>'
-              : '<p style="color:var(--text-muted)">Preview will appear here...</p>'),
+              : rendered
+                ? ""
+                : '<p style="color:var(--text-muted)">Preview will appear here...</p>'),
         }}
       />
       {inline && (
@@ -701,8 +759,27 @@ function processImages(root: HTMLElement, tabPath: string) {
     img.loading = "lazy";
     img.decoding = "async";
     const src = img.getAttribute("src") ?? "";
-    if (!src || /^(https?:|data:|blob:|markview:|asset:)/i.test(src)) return;
-    const absolute = resolveRelative(tabPath, src);
+    const original = img.dataset.originalSrc ?? src;
+    if (img.dataset.originalSrc === undefined) {
+      img.dataset.originalSrc = original;
+    }
+    if (
+      !original ||
+      /^(https?:|data:|blob:|markview:|asset:)/i.test(original)
+    ) {
+      return;
+    }
+    if (/^[/\\]{2}/.test(original)) {
+      // Protocol-relative / UNC source: the browser would resolve it to a
+      // network host, and the custom protocol would probe an SMB share.
+      img.removeAttribute("src");
+      return;
+    }
+    const absolute = resolveRelative(tabPath, original);
+    if (!absolute) {
+      img.removeAttribute("src");
+      return;
+    }
     try {
       img.src = convertFileSrc(absolute, "markview");
     } catch {
@@ -1003,11 +1080,28 @@ function handleLinkClick(
   const anchor = target.closest("a");
   if (!anchor) return;
   const href = anchor.getAttribute("href");
-  if (!href) return;
+  if (!href) {
+    event.preventDefault();
+    return;
+  }
+
+  if (/^[/\\]{2}/.test(href)) {
+    event.preventDefault();
+    toast.show("Network-path links are not supported.", {
+      type: "warn",
+      duration: 3000,
+    });
+    return;
+  }
 
   if (href.startsWith("#")) {
     event.preventDefault();
-    const id = decodeURIComponent(href.slice(1));
+    let id: string;
+    try {
+      id = decodeURIComponent(href.slice(1));
+    } catch {
+      return;
+    }
     const heading = document.getElementById(id);
     heading?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
@@ -1022,7 +1116,8 @@ function handleLinkClick(
   event.preventDefault();
   if (!tabPath) return;
   const path = resolveRelative(tabPath, href.split("#")[0]);
-  void useStore.getState().openPath(path, false);
+  if (!path) return;
+  void useStore.getState().openPath(path, false, tabPath);
 }
 
 /** Best-effort mapping from a rendered block back to source lines. */

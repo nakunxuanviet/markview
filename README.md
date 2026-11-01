@@ -24,7 +24,7 @@ It ships as a single native binary with no Python runtime and no sidecar process
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20.19+ or 22.12+ (required by Vite 8)
 - Rust (stable) with the MSVC toolchain
 - WebView2 runtime (preinstalled on Windows 10/11)
 
@@ -47,6 +47,13 @@ This produces an NSIS installer under `src-tauri/target/release/bundle/nsis/` an
 standalone executable at `src-tauri/target/release/markview.exe`. Because
 `bundle.createUpdaterArtifacts` is enabled, the build also emits a `.sig` file next to the
 installer when `TAURI_SIGNING_PRIVATE_KEY` is set; the updater reuses the installer itself.
+
+## Tests
+
+```bash
+npm test          # Vitest (utils, settings sanitisation)
+cd src-tauri && cargo test
+```
 
 ## Releases and auto-update
 
@@ -142,8 +149,12 @@ settings carry over):
 | Ctrl+Shift+F    | Search in files      |
 | Ctrl+P          | Quick open           |
 | Ctrl+Shift+P    | Command palette      |
+| Ctrl+Tab        | Next tab             |
+| Ctrl+1..9       | Jump to tab          |
+| Ctrl+Enter      | Update preview now   |
 | Ctrl+B / Ctrl+I | Bold / italic        |
 | Ctrl+K          | Insert link          |
+| Ctrl+Shift+K    | Inline code          |
 | Ctrl+\          | Toggle sidebar       |
 | Ctrl+Shift+V    | Toggle preview       |
 | Ctrl+,          | Settings             |
@@ -152,7 +163,13 @@ settings carry over):
 
 ## Security model
 
-Every path coming from the webview is checked against a trusted-roots model in Rust:
-the app data directory, the current workspace, folders the user opened, files the user
-opened, and the `assets` sibling of a trusted file (image writes only). Preview images are
-served through the custom protocol after the same validation.
+Preview HTML is sanitized with an allowlist: scripts, event handlers, raw app
+classes and unbranded IDs are removed, and heading/footnote IDs are prefixed so
+a document cannot reuse UI element IDs. Local preview images are served through
+the custom protocol only after a trusted-roots check.
+
+File operations that receive a path from the webview validate it against the app
+data directory, the current workspace, folders the user opened, files the user
+opened, and the `assets` sibling of a trusted file (image writes only). Native
+Open/Save As dialogs, drag & drop and file-association launches are treated as
+explicit user grants.

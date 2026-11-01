@@ -1,7 +1,7 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 
-import { useStore } from "./store";
+import { flushSettingsPersist, useStore } from "./store";
 import { toast } from "./toast";
 
 let running = false;
@@ -83,8 +83,11 @@ export async function checkForUpdates(
     }
 
     // Flush the session first: installing exits the process, and the restarted
-    // build should come back with the same tabs and unsaved buffers.
+    // build should come back with the same tabs and unsaved buffers. The second
+    // call captures edits made while the first write was in flight.
     await useStore.getState().saveSession();
+    await useStore.getState().saveSession();
+    await flushSettingsPersist();
     await update.install();
     // Windows quits during install; other platforms need an explicit relaunch.
     await relaunch();

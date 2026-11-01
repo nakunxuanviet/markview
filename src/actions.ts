@@ -23,6 +23,22 @@ export async function reloadAllFromDisk(): Promise<void> {
       const data = await api.openFileByPath(tab.path);
       if (data && !data.error && typeof data.content === "string") {
         state.replaceTabContent(tab.id, data.content, true);
+        useStore.setState((current) => ({
+          tabs: {
+            ...current.tabs,
+            [tab.id]: {
+              ...current.tabs[tab.id],
+              encoding: data.encoding ?? current.tabs[tab.id].encoding,
+              bom: data.bom ?? current.tabs[tab.id].bom,
+              lineEnding: data.line_ending ?? current.tabs[tab.id].lineEnding,
+              mixedLineEndings:
+                data.mixed_line_endings ??
+                current.tabs[tab.id].mixedLineEndings,
+              diskModifiedMs:
+                data.modified_ms ?? current.tabs[tab.id].diskModifiedMs,
+            },
+          },
+        }));
       }
     } catch {
       /* ignore individual failures */

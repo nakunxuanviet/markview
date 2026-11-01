@@ -1,6 +1,11 @@
 import type { EditorView } from "@codemirror/view";
 
-function replaceSelection(view: EditorView, insert: string, selectFrom: number, selectTo: number) {
+function replaceSelection(
+  view: EditorView,
+  insert: string,
+  selectFrom: number,
+  selectTo: number,
+) {
   const { from, to } = view.state.selection.main;
   view.dispatch({
     changes: { from, to, insert },
@@ -10,11 +15,21 @@ function replaceSelection(view: EditorView, insert: string, selectFrom: number, 
   view.focus();
 }
 
-function wrap(view: EditorView, before: string, after: string, placeholder: string) {
+function wrap(
+  view: EditorView,
+  before: string,
+  after: string,
+  placeholder: string,
+) {
   const { from, to } = view.state.selection.main;
   const selected = view.state.sliceDoc(from, to) || placeholder;
   const insert = `${before}${selected}${after}`;
-  replaceSelection(view, insert, before.length, before.length + selected.length);
+  replaceSelection(
+    view,
+    insert,
+    before.length,
+    before.length + selected.length,
+  );
 }
 
 function prefixLines(view: EditorView, prefix: string) {
@@ -71,7 +86,7 @@ export function applyFormat(view: EditorView | null, kind: string) {
       break;
     }
     case "image":
-      replaceSelection(view, "![alt text](image.png)", 11, 22);
+      replaceSelection(view, "![alt text](image.png)", 12, 21);
       break;
     case "heading":
       prefixLines(view, "## ");

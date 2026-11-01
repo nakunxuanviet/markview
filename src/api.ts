@@ -57,8 +57,10 @@ export const api = {
   getSettings: () => invoke<AppSettings>("get_settings"),
   saveSettings: (data: Record<string, unknown>) =>
     invoke<boolean>("save_settings", { data }),
+  restartWatcher: () => invoke<void>("restart_watcher"),
   setWindowTheme: (theme: string) =>
     invoke<void>("set_window_theme", { theme }),
+  confirmClose: () => invoke<void>("confirm_close"),
 
   // Folders
   openFolder: (path: string) =>
@@ -66,7 +68,7 @@ export const api = {
   getFolderTree: (path: string, expanded: string[] = []) =>
     invoke<FolderTree>("get_folder_tree", { path, expanded }),
   getFolderChildren: (path: string) =>
-    invoke<TreeNode[]>("get_folder_children", { path }),
+    invoke<TreeNode[] | { error?: string }>("get_folder_children", { path }),
   createFile: (folder: string, name: string) =>
     invoke<OpResult>("create_file", { folder, name }),
   createFolder: (parent: string, name: string) =>
@@ -83,12 +85,20 @@ export const api = {
   // Files
   openFileByPath: (path: string) =>
     invoke<FileData>("open_file_path", { path }),
+  openFileLink: (base: string, path: string) =>
+    invoke<FileData>("open_file_link", { base, path }),
+  fileMtimes: (paths: string[]) =>
+    invoke<Record<string, { exists: boolean; modified_ms: number | null }>>(
+      "file_mtimes",
+      { paths },
+    ),
   saveFile: (
     path: string,
     content: string,
     encoding?: string,
     bom?: boolean,
     lineEnding?: string,
+    expectedModifiedMs?: number,
   ) =>
     invoke<OpResult>("save_file", {
       path,
@@ -96,6 +106,7 @@ export const api = {
       encoding,
       bom,
       lineEnding,
+      expectedModifiedMs,
     }),
   saveFileAs: (
     path: string,
@@ -103,6 +114,7 @@ export const api = {
     encoding?: string,
     bom?: boolean,
     lineEnding?: string,
+    remember = true,
   ) =>
     invoke<OpResult>("save_file_as", {
       path,
@@ -110,6 +122,7 @@ export const api = {
       encoding,
       bom,
       lineEnding,
+      remember,
     }),
   getRecentFiles: () => invoke<string[]>("get_recent_files"),
   getRecentFolders: () => invoke<string[]>("get_recent_folders"),
@@ -118,8 +131,6 @@ export const api = {
   saveSession: (data: Record<string, unknown>) =>
     invoke<boolean>("save_session", { data }),
   loadSession: () => invoke<SessionData | null>("load_session"),
-  backupTab: (tabId: string, content: string) =>
-    invoke<void>("backup_tab", { tabId, content }),
 
   // Markdown
   renderMarkdown: (text: string) =>
@@ -136,11 +147,6 @@ export const api = {
     invoke<OpResult>("reveal_in_explorer", { path }),
   pathKind: (path: string) =>
     invoke<"file" | "directory" | "missing">("path_kind", { path }),
-  restoreWorkspace: (folder: string | null, files: string[]) =>
-    invoke<{ workspace: string | null; tree: TreeNode[] | null }>(
-      "restore_workspace",
-      { folder, files },
-    ),
   takeLaunchFile: () => invoke<string | null>("take_launch_file"),
   registerFileAssociation: () => invoke<OpResult>("register_file_association"),
   unregisterFileAssociation: () =>

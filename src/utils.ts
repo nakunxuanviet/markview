@@ -1,9 +1,3 @@
-export function escapeHtml(value: string): string {
-  const div = document.createElement("div");
-  div.textContent = value;
-  return div.innerHTML;
-}
-
 export function basename(path: string): string {
   const norm = path.replace(/\\/g, "/");
   return norm.slice(norm.lastIndexOf("/") + 1) || norm;
@@ -35,8 +29,14 @@ export function normalizeNewlines(value: string): string {
 
 /** Resolve a relative URL against the directory containing `baseFile`. */
 export function resolveRelative(baseFile: string, rel: string): string {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(rel) || rel.startsWith("//")) {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(rel)) {
     return rel;
+  }
+  // Network-path references (`//host/...`) and UNC/device prefixes are never
+  // local document paths. Returning an empty value keeps callers from passing
+  // them to the filesystem or the custom protocol.
+  if (/^[/\\]{2}/.test(rel)) {
+    return "";
   }
   // Windows verbatim paths (`\\?\C:\…`) are absolute but must lose the prefix.
   const base = baseFile.replace(/^[/\\]{2}\?[/\\]/, "").replace(/\\/g, "/");
@@ -70,17 +70,6 @@ export function formatSize(bytes: number): string {
 
 export function countWords(text: string): number {
   return text.trim() ? text.trim().split(/\s+/).length : 0;
-}
-
-export function debounce<T extends (...args: never[]) => void>(
-  fn: T,
-  delay: number,
-): (...args: Parameters<T>) => void {
-  let timer: number | undefined;
-  return (...args: Parameters<T>) => {
-    if (timer) window.clearTimeout(timer);
-    timer = window.setTimeout(() => fn(...args), delay);
-  };
 }
 
 /** Extract an ordered list of ATX headings (outside fenced code blocks). */

@@ -1,5 +1,6 @@
 //! Markdown → sanitized HTML (comrak + ammonia).
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -94,7 +95,48 @@ fn build_builder() -> ammonia::Builder<'static> {
         .tag_attributes(tag_attributes)
         .url_schemes(schemes)
         .strip_comments(true)
-        .link_rel(Some("noopener noreferrer"));
+        .link_rel(Some("noopener noreferrer"))
+        // Prefix every id so a document cannot reuse app ids such as
+        // `settings-panel` or `preview-content` to trigger global app CSS.
+        .id_prefix(Some("user-content-"))
+        .attribute_filter(|_element, attribute, value| {
+            if matches!(attribute, "href" | "src" | "poster" | "action") {
+                let value_trimmed = value.trim_start();
+                let bytes = value_trimmed.as_bytes();
+                let network_path = bytes.len() >= 2
+                    && matches!(bytes[0], b'/' | b'\\')
+                    && matches!(bytes[1], b'/' | b'\\');
+                if network_path {
+                    return None;
+                }
+            }
+            if attribute == "href" && value.starts_with('#') {
+                if value.starts_with("#user-content-") {
+                    return Some(Cow::Borrowed(value));
+                }
+                return Some(Cow::Owned(format!("#user-content-{}", &value[1..])));
+            }
+            if attribute == "class" {
+                // Only keep semantic highlight/footnote/task classes. Raw app
+                // classes (`mv-modal`, `settings-overlay`, `toast-container`…)
+                // must not reach the global stylesheet.
+                let kept: Vec<&str> = value
+                    .split_whitespace()
+                    .filter(|token| {
+                        token.starts_with("language-")
+                            || *token == "hljs"
+                            || token.starts_with("footnote")
+                            || token.starts_with("task-list")
+                            || *token == "contains-task-list"
+                    })
+                    .collect();
+                if kept.is_empty() {
+                    return None;
+                }
+                return Some(Cow::Owned(kept.join(" ")));
+            }
+            Some(Cow::Borrowed(value))
+        });
     builder
 }
 
@@ -137,6 +179,29 @@ mod tests {
     fn strips_javascript_urls() {
         let out = sanitize("<a href=\"javascript:alert(1)\">x</a>");
         assert!(!out.contains("javascript:"));
+    }
+
+    #[test]
+    fn strips_protocol_relative_and_unc_urls() {
+        let out = sanitize(
+            "<a href=\"//evil.example/x\">x</a><img src=\"//evil.example/x.png\"><a href=\"\\\\evil\\share\\x\">y</a>",
+        );
+        assert!(!out.contains("//evil.example"));
+        assert!(!out.contains(r"\\evil"));
+        assert!(out.contains("x"));
+    }
+
+    #[test]
+    fn strips_app_classes_and_prefixes_ids() {
+        let out = sanitize(
+            "<div class=\"mv-modal\" id=\"settings-panel\">fake</div><a href=\"#fn1\">x</a><h2 id=\"fn1\">H</h2><pre class=\"mv-modal language-js\"><code class=\"language-js\">x</code></pre>",
+        );
+        assert!(!out.contains("mv-modal"));
+        assert!(!out.contains("id=\"settings-panel\""));
+        assert!(out.contains("id=\"user-content-settings-panel\""));
+        assert!(out.contains("href=\"#user-content-fn1\""), "{out}");
+        assert!(out.contains("id=\"user-content-fn1\""));
+        assert!(out.contains("class=\"language-js\""));
     }
 
     #[test]

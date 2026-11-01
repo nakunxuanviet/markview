@@ -185,12 +185,16 @@ export function TabBar() {
                 event.preventDefault();
                 const source = draggedId.current;
                 if (!source || source === id) return;
+                const target = event.currentTarget as HTMLElement;
+                const rect = target.getBoundingClientRect();
+                const after = event.clientX > rect.left + rect.width / 2;
                 useStore.setState((state) => {
                   const next = [...state.order];
                   const from = next.indexOf(source);
-                  const to = next.indexOf(id);
-                  if (from < 0 || to < 0) return state;
+                  if (from < 0 || !next.includes(id)) return state;
                   next.splice(from, 1);
+                  let to = next.indexOf(id);
+                  if (after) to += 1;
                   next.splice(to, 0, source);
                   return { order: next };
                 });

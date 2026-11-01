@@ -25,7 +25,7 @@ import { applyFormat } from "./format";
 import { editorBus } from "./editorBus";
 import { editorRef } from "./editorRef";
 import { setScrollSyncEnabled } from "./scrollSync";
-import { useStore } from "./store";
+import { flushSettingsPersist, persistSettings, useStore } from "./store";
 import { applyAppearance, applyTheme } from "./theme";
 import { toast } from "./toast";
 import { dirname } from "./utils";
@@ -144,9 +144,7 @@ export function App() {
       if (saveTimer) window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(() => {
         const level = useStore.getState().settings.appearance.zoom_level;
-        void api
-          .saveSettings({ appearance: { zoom_level: level } })
-          .catch(() => undefined);
+        void persistSettings({ appearance: { zoom_level: level } });
       }, 350);
     };
 
@@ -234,6 +232,7 @@ export function App() {
     if (!ready) return;
     const handler = () => {
       void useStore.getState().saveSession();
+      void flushSettingsPersist();
     };
     const onVisibility = () => {
       if (document.visibilityState === "hidden") handler();
@@ -243,6 +242,98 @@ export function App() {
     return () => {
       window.removeEventListener("beforeunload", handler);
       document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [ready]);
+
+  // Native close: flush the session, then let Rust finish the close. Rust
+  // waits at most three seconds, so a broken webview can never block exit.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    let handled = false;
+    void (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        const stop = await listen("app-close-requested", () => {
+          if (handled) return;
+          handled = true;
+          void (async () => {
+            try {
+              const state = useStore.getState();
+              if (state.ready) {
+                // The second call captures edits made while the first write
+                // was in flight.
+                await state.saveSession();
+                await useStore.getState().saveSession();
+              }
+            } catch (error) {
+              console.error("Failed to flush session before close", error);
+            } finally {
+              await flushSettingsPersist().catch(() => undefined);
+              await api.confirmClose().catch(() => undefined);
+            }
+          })();
+        });
+        if (disposed) stop();
+        else unlisten = stop;
+      } catch (error) {
+        console.warn("close listener unavailable", error);
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Files outside the workspace are not covered by the recursive watcher.
+  // Check their mtimes whenever the window regains focus.
+  useEffect(() => {
+    if (!ready) return;
+    let timer: number | undefined;
+    const check = async () => {
+      const state = useStore.getState();
+      const tracked = Object.values(state.tabs).filter((tab) => !!tab.path);
+      if (tracked.length === 0) return;
+      try {
+        const info = await api.fileMtimes(
+          tracked.map((tab) => tab.path as string),
+        );
+        for (const tab of tracked) {
+          const current = useStore.getState().tabs[tab.id];
+          if (!current || current.path !== tab.path) continue;
+          const entry = info[tab.path as string];
+          if (!entry) continue;
+          if (!entry.exists) {
+            void useStore.getState().handleFsEvent({
+              type: "deleted",
+              path: tab.path as string,
+              is_directory: false,
+            });
+          } else if (
+            entry.modified_ms != null &&
+            current.diskModifiedMs != null &&
+            entry.modified_ms !== current.diskModifiedMs
+          ) {
+            void useStore.getState().handleFsEvent({
+              type: "modified",
+              path: tab.path as string,
+              is_directory: false,
+            });
+          }
+        }
+      } catch {
+        /* metadata check is best-effort */
+      }
+    };
+    const onFocus = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void check(), 400);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (timer) window.clearTimeout(timer);
     };
   }, [ready]);
 
@@ -341,6 +432,9 @@ export function App() {
       }
 
       if (event.key === "Escape") {
+        // Let an open SelectMenu close itself instead of closing the whole
+        // Settings dialog underneath it.
+        if (document.querySelector(".select-menu")) return;
         if (state.settingsOpen) {
           consume();
           useStore.setState({ settingsOpen: false });
@@ -517,7 +611,7 @@ export function App() {
       document.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";
       const width = useStore.getState().sidebarWidth;
-      void api.saveSettings({ appearance: { sidebar_width: width } });
+      void persistSettings({ appearance: { sidebar_width: width } });
     };
     document.body.style.cursor = "col-resize";
     document.addEventListener("mousemove", onMove);
@@ -695,6 +789,16 @@ async function insertDroppedImages(paths: string[]): Promise<void> {
     }
   }
   if (snippets.length > 0) {
+    const current = useStore.getState();
+    if (
+      current.activeId !== tab.id ||
+      current.tabs[tab.id]?.path !== tab.path
+    ) {
+      toast.show("Images saved, but the active tab changed before insertion.", {
+        type: "warn",
+      });
+      return;
+    }
     editorRef.insertText?.(`${snippets.join("\n\n")}\n`);
     toast.show(
       `Inserted ${snippets.length} image${snippets.length === 1 ? "" : "s"}`,

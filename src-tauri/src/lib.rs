@@ -9,7 +9,8 @@ mod state;
 mod watcher;
 
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::atomic::Ordering;
+use std::time::{Duration, UNIX_EPOCH};
 
 use percent_encoding::percent_decode_str;
 use serde_json::{json, Value};
@@ -84,7 +85,7 @@ fn not_modified(etag: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(304)
         .header("ETag", etag)
-        .header("Cache-Control", "private, max-age=300, must-revalidate")
+        .header("Cache-Control", "private, no-cache")
         .header("Access-Control-Allow-Origin", "*")
         .body(Vec::new())
         .expect("static response")
@@ -114,7 +115,7 @@ fn serve_image(
         .status(200)
         .header("Content-Type", mime_for(&path))
         .header("ETag", etag)
-        .header("Cache-Control", "private, max-age=300, must-revalidate")
+        .header("Cache-Control", "private, no-cache")
         .header("X-Content-Type-Options", "nosniff")
         .header("Access-Control-Allow-Origin", "*")
         .body(bytes)
@@ -146,6 +147,30 @@ pub fn run() {
             if !matches!(event, WindowEvent::CloseRequested { .. }) {
                 return;
             }
+
+            let state = window.app_handle().state::<AppState>();
+            if !state.allow_close.load(Ordering::SeqCst) {
+                // Ask the webview to flush its session before the process
+                // exits. `confirm_close` (or the timeout below) flips the flag
+                // and closes the window again.
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                }
+                if !state.close_requested.swap(true, Ordering::SeqCst) {
+                    let _ = window.emit("app-close-requested", ());
+                    let app = window.app_handle().clone();
+                    let fallback_window = window.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_secs(3));
+                        let state = app.state::<AppState>();
+                        if !state.allow_close.swap(true, Ordering::SeqCst) {
+                            let _ = fallback_window.close();
+                        }
+                    });
+                }
+                return;
+            }
+
             let maximized = window.is_maximized().unwrap_or(false);
             let scale = window.scale_factor().unwrap_or(1.0);
             let size = window
@@ -157,7 +182,6 @@ pub fn run() {
                 .ok()
                 .map(|value| value.to_logical::<f64>(scale));
 
-            let state = window.app_handle().state::<AppState>();
             if let Ok(mut settings) = state.settings.lock() {
                 let mut config = settings
                     .get("window")
@@ -175,7 +199,7 @@ pub fn run() {
                     }
                 }
                 config.insert("maximized".into(), json!(maximized));
-                settings.update(&json!({ "window": Value::Object(config) }));
+                let _ = settings.update(&json!({ "window": Value::Object(config) }));
             };
         })
         .register_asynchronous_uri_scheme_protocol("markview", |ctx, request, responder| {
@@ -212,21 +236,41 @@ pub fn run() {
                     .and_then(|settings| settings.get("window").cloned())
             };
             if let Some(window) = app.get_webview_window("main") {
+                let saved = saved_window.as_ref();
+                let saved_number = |key: &str| {
+                    saved
+                        .and_then(|value| value.get(key))
+                        .and_then(Value::as_f64)
+                };
+                let saved_x = saved_number("x");
+                let saved_y = saved_number("y");
+
+                // Pick the monitor that actually contains the saved position;
+                // falling back to the current/primary monitor only when the
+                // saved display is no longer attached.
                 let monitor = window
-                    .primary_monitor()
+                    .available_monitors()
                     .ok()
-                    .flatten()
-                    .or_else(|| window.current_monitor().ok().flatten());
+                    .and_then(|monitors| {
+                        let (Some(x), Some(y)) = (saved_x, saved_y) else {
+                            return None;
+                        };
+                        monitors.into_iter().find(|monitor| {
+                            let scale = monitor.scale_factor();
+                            let position = monitor.position().to_logical::<f64>(scale);
+                            let size = monitor.size().to_logical::<f64>(scale);
+                            x >= position.x
+                                && x <= position.x + size.width
+                                && y >= position.y
+                                && y <= position.y + size.height
+                        })
+                    })
+                    .or_else(|| window.current_monitor().ok().flatten())
+                    .or_else(|| window.primary_monitor().ok().flatten());
                 if let Some(monitor) = monitor {
                     let scale = monitor.scale_factor();
                     let monitor_size = monitor.size().to_logical::<f64>(scale);
                     let monitor_pos = monitor.position().to_logical::<f64>(scale);
-                    let saved = saved_window.as_ref();
-                    let saved_number = |key: &str| {
-                        saved
-                            .and_then(|value| value.get(key))
-                            .and_then(Value::as_f64)
-                    };
 
                     let max_width = (monitor_size.width - 40.0).max(800.0);
                     let max_height = (monitor_size.height - 80.0).max(480.0);
@@ -239,8 +283,6 @@ pub fn run() {
 
                     let _ = window.set_size(tauri::LogicalSize::new(width, height));
 
-                    let saved_x = saved_number("x");
-                    let saved_y = saved_number("y");
                     let visible = match (saved_x, saved_y) {
                         (Some(x), Some(y)) => {
                             x > monitor_pos.x - width + 120.0
@@ -282,25 +324,26 @@ pub fn run() {
             commands::move_item,
             commands::search_filenames,
             commands::open_file_path,
+            commands::open_file_link,
+            commands::file_mtimes,
             commands::save_file,
             commands::save_file_as,
             commands::get_recent_files,
             commands::get_recent_folders,
             commands::save_session,
             commands::load_session,
-            commands::backup_tab,
             commands::render_markdown,
             commands::get_settings,
             commands::save_settings,
-            commands::get_setting,
+            commands::restart_watcher,
             commands::save_image,
             commands::import_image,
             commands::reveal_in_explorer,
             commands::search_in_files,
             commands::cancel_search,
             commands::path_kind,
-            commands::restore_workspace,
             commands::set_window_theme,
+            commands::confirm_close,
             commands::take_launch_file,
             commands::register_file_association,
             commands::unregister_file_association,

@@ -31,8 +31,117 @@ const nextId = () => `tab_${Date.now()}_${++tabSeq}`;
 const tabRevisions = new Map<string, number>();
 const backedUpRevisions = new Map<string, number>();
 let lastSavedMetaHash = "";
-let sessionSaving = false;
+let sessionSavePromise: Promise<void> | null = null;
+let fileSaveChain: Promise<unknown> = Promise.resolve();
 let saveAllRunning = false;
+let settingsWriteFailed = false;
+let settingsPersistChain: Promise<void> = Promise.resolve();
+let pendingSettingsPatch: Record<string, unknown> | null = null;
+let settingsPersistTimer: number | undefined;
+let refreshTreeAfterSettings = false;
+let treeRequestSeq = 0;
+let treeErrorShown = false;
+
+const MAX_CLOSED_TABS = 20;
+const MAX_CLOSED_TAB_BYTES = 64 * 1024 * 1024;
+
+/** Keep the closed-tab recovery stack bounded in both count and memory. */
+function trimClosedTabs(stack: Tab[]): Tab[] {
+  const kept: Tab[] = [];
+  let bytes = 0;
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    const tab = stack[index];
+    const size = tab.content.length * 2;
+    if (kept.length >= MAX_CLOSED_TABS) break;
+    if (kept.length > 0 && bytes + size > MAX_CLOSED_TAB_BYTES) break;
+    kept.unshift(tab);
+    bytes += size;
+  }
+  return kept;
+}
+
+async function writeSettings(patch: Record<string, unknown>): Promise<void> {
+  try {
+    const ok = await api.saveSettings(patch);
+    if (ok) {
+      settingsWriteFailed = false;
+      return;
+    }
+  } catch (error) {
+    console.error("Failed to save settings", error);
+  }
+  if (!settingsWriteFailed) {
+    settingsWriteFailed = true;
+    toast.show("Could not save settings to disk.", {
+      type: "error",
+      duration: 6000,
+    });
+  }
+}
+
+/** Persist a settings patch in invocation order, reporting a write failure
+ * once instead of on every keystroke/toggle in a burst. */
+export function persistSettings(patch: Record<string, unknown>): Promise<void> {
+  const next = settingsPersistChain.then(
+    () => writeSettings(patch),
+    () => writeSettings(patch),
+  );
+  settingsPersistChain = next.catch(() => undefined);
+  return next;
+}
+
+/** Coalesce settings writes during continuous typing in Settings. */
+function queueSettingsPersist(patch: Record<string, unknown>): void {
+  pendingSettingsPatch = pendingSettingsPatch
+    ? deepMerge(pendingSettingsPatch, patch)
+    : patch;
+  if (settingsPersistTimer !== undefined) {
+    window.clearTimeout(settingsPersistTimer);
+  }
+  settingsPersistTimer = window.setTimeout(() => {
+    settingsPersistTimer = undefined;
+    const pending = pendingSettingsPatch;
+    pendingSettingsPatch = null;
+    if (pending) {
+      void persistSettings(pending).then(() => {
+        if (refreshTreeAfterSettings) {
+          refreshTreeAfterSettings = false;
+          scheduleTreeRefresh(() => useStore.getState().refreshTree());
+        }
+      });
+    }
+  }, 300);
+}
+
+/** Flush a queued settings patch before the process exits. */
+export async function flushSettingsPersist(): Promise<void> {
+  if (settingsPersistTimer !== undefined) {
+    window.clearTimeout(settingsPersistTimer);
+    settingsPersistTimer = undefined;
+  }
+  const pending = pendingSettingsPatch;
+  pendingSettingsPatch = null;
+  if (pending) await persistSettings(pending);
+  await settingsPersistChain;
+  if (refreshTreeAfterSettings) {
+    refreshTreeAfterSettings = false;
+    scheduleTreeRefresh(() => useStore.getState().refreshTree());
+  }
+}
+
+/**
+ * Async Rust commands run on a threadpool, so two rapid saves of the same tab
+ * could otherwise land on disk out of order. Serialize writes in invocation
+ * order; a failed write does not break the chain.
+ */
+function serializeFileSave<T>(task: () => Promise<T>): Promise<T> {
+  const next = fileSaveChain.then(task, task);
+  fileSaveChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
 
 function hashString(value: string): string {
   let hash = 0x811c9dc5;
@@ -41,24 +150,6 @@ function hashString(value: string): string {
     hash = Math.imul(hash, 0x01000193);
   }
   return (hash >>> 0).toString(36);
-}
-
-function sessionMetaHash(state: {
-  order: string[];
-  activeId: string | null;
-  workspace: string | null;
-  sidebarWidth: number;
-  sidebarVisible: boolean;
-}): string {
-  return hashString(
-    JSON.stringify({
-      order: state.order,
-      active: state.activeId,
-      workspace: state.workspace,
-      sidebarWidth: state.sidebarWidth,
-      sidebarVisible: state.sidebarVisible,
-    }),
-  );
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -145,6 +236,232 @@ function deepMerge<T>(base: T, patch: unknown): T {
     out[key] = key in out ? deepMerge(out[key], value) : value;
   }
   return out as T;
+}
+
+function asText(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function asBoundedNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  let number: number;
+  if (typeof value === "number") {
+    number = value;
+  } else if (typeof value === "string" && value.trim()) {
+    number = Number(value);
+  } else {
+    return fallback;
+  }
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
+function asStringList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Settings are user-editable JSON and can survive version changes. Coerce
+ * sections that the UI maps over (arrays), clamp numeric controls, and keep
+ * unknown keys for forward compatibility.
+ */
+export function sanitizeSettings(settings: AppSettings): AppSettings {
+  const appearance = {
+    ...settings.appearance,
+    theme: (settings.appearance.theme === "light" ? "light" : "dark") as Theme,
+    font_family_editor: asText(
+      settings.appearance.font_family_editor,
+      DEFAULT_SETTINGS.appearance.font_family_editor,
+    ),
+    font_family_preview: asText(
+      settings.appearance.font_family_preview,
+      DEFAULT_SETTINGS.appearance.font_family_preview,
+    ),
+    font_size_editor: asBoundedNumber(
+      settings.appearance.font_size_editor,
+      DEFAULT_SETTINGS.appearance.font_size_editor,
+      10,
+      32,
+    ),
+    font_size_preview: asBoundedNumber(
+      settings.appearance.font_size_preview,
+      DEFAULT_SETTINGS.appearance.font_size_preview,
+      10,
+      32,
+    ),
+    zoom_level: asBoundedNumber(
+      settings.appearance.zoom_level,
+      DEFAULT_SETTINGS.appearance.zoom_level,
+      0.5,
+      2.5,
+    ),
+    zoom_enabled: asBool(
+      settings.appearance.zoom_enabled,
+      DEFAULT_SETTINGS.appearance.zoom_enabled,
+    ),
+    sidebar_width: asBoundedNumber(
+      settings.appearance.sidebar_width,
+      DEFAULT_SETTINGS.appearance.sidebar_width,
+      150,
+      500,
+    ),
+    sidebar_visible: asBool(
+      settings.appearance.sidebar_visible,
+      DEFAULT_SETTINGS.appearance.sidebar_visible,
+    ),
+    preview_visible: asBool(
+      settings.appearance.preview_visible,
+      DEFAULT_SETTINGS.appearance.preview_visible,
+    ),
+    show_toolbar: asBool(
+      settings.appearance.show_toolbar,
+      DEFAULT_SETTINGS.appearance.show_toolbar,
+    ),
+    show_statusbar: asBool(
+      settings.appearance.show_statusbar,
+      DEFAULT_SETTINGS.appearance.show_statusbar,
+    ),
+    show_line_numbers: asBool(
+      settings.appearance.show_line_numbers,
+      DEFAULT_SETTINGS.appearance.show_line_numbers,
+    ),
+  };
+  const editor = {
+    ...settings.editor,
+    word_wrap: asBool(
+      settings.editor.word_wrap,
+      DEFAULT_SETTINGS.editor.word_wrap,
+    ),
+    tab_size: asBoundedNumber(
+      settings.editor.tab_size,
+      DEFAULT_SETTINGS.editor.tab_size,
+      1,
+      8,
+    ),
+    insert_spaces: asBool(
+      settings.editor.insert_spaces,
+      DEFAULT_SETTINGS.editor.insert_spaces,
+    ),
+    auto_close_brackets: asBool(
+      settings.editor.auto_close_brackets,
+      DEFAULT_SETTINGS.editor.auto_close_brackets,
+    ),
+    auto_indent: asBool(
+      settings.editor.auto_indent,
+      DEFAULT_SETTINGS.editor.auto_indent,
+    ),
+    highlight_active_line: asBool(
+      settings.editor.highlight_active_line,
+      DEFAULT_SETTINGS.editor.highlight_active_line,
+    ),
+    match_brackets: asBool(
+      settings.editor.match_brackets,
+      DEFAULT_SETTINGS.editor.match_brackets,
+    ),
+    code_folding: asBool(
+      settings.editor.code_folding,
+      DEFAULT_SETTINGS.editor.code_folding,
+    ),
+    spellcheck: asBool(
+      settings.editor.spellcheck,
+      DEFAULT_SETTINGS.editor.spellcheck,
+    ),
+  };
+  const visibleExtensions = asStringList(settings.files.visible_extensions);
+  const excludePatterns = asStringList(settings.files.exclude_patterns);
+  const files = {
+    ...settings.files,
+    auto_save: asBool(
+      settings.files.auto_save,
+      DEFAULT_SETTINGS.files.auto_save,
+    ),
+    auto_save_interval: asBoundedNumber(
+      settings.files.auto_save_interval,
+      DEFAULT_SETTINGS.files.auto_save_interval,
+      5,
+      600,
+    ),
+    default_encoding: normalizeEncodingLabel(
+      asText(settings.files.default_encoding, "UTF-8"),
+    ),
+    default_line_ending: normalizeLineEnding(
+      asText(settings.files.default_line_ending, "lf"),
+    ),
+    visible_extensions:
+      visibleExtensions && visibleExtensions.length
+        ? visibleExtensions
+        : DEFAULT_SETTINGS.files.visible_extensions,
+    show_hidden_files: asBool(
+      settings.files.show_hidden_files,
+      DEFAULT_SETTINGS.files.show_hidden_files,
+    ),
+    folders_first: asBool(
+      settings.files.folders_first,
+      DEFAULT_SETTINGS.files.folders_first,
+    ),
+    folder_label_segments: asBoundedNumber(
+      settings.files.folder_label_segments,
+      DEFAULT_SETTINGS.files.folder_label_segments,
+      1,
+      6,
+    ),
+    exclude_patterns:
+      excludePatterns ?? DEFAULT_SETTINGS.files.exclude_patterns,
+  };
+  const preview = {
+    ...settings.preview,
+    scroll_sync: asBool(
+      settings.preview.scroll_sync,
+      DEFAULT_SETTINGS.preview.scroll_sync,
+    ),
+    render_mermaid: asBool(
+      settings.preview.render_mermaid,
+      DEFAULT_SETTINGS.preview.render_mermaid,
+    ),
+    render_math: asBool(
+      settings.preview.render_math,
+      DEFAULT_SETTINGS.preview.render_math,
+    ),
+    double_click_preview: asBool(
+      settings.preview.double_click_preview,
+      DEFAULT_SETTINGS.preview.double_click_preview,
+    ),
+  };
+  const session = {
+    ...settings.session,
+    restore_session: asBool(
+      settings.session.restore_session,
+      DEFAULT_SETTINGS.session.restore_session,
+    ),
+    backup_interval: asBoundedNumber(
+      settings.session.backup_interval,
+      DEFAULT_SETTINGS.session.backup_interval,
+      3,
+      60,
+    ),
+  };
+  return {
+    ...settings,
+    appearance,
+    editor,
+    files,
+    preview,
+    session,
+    recent_files: asStringList(settings.recent_files) ?? [],
+    recent_folders: asStringList(settings.recent_folders) ?? [],
+  };
 }
 
 function currentEditorContent(): string {
@@ -543,8 +860,6 @@ export interface AppStore {
   reopenClosedTab: () => Promise<boolean>;
   refreshRecent: () => Promise<void>;
   markModified: (id: string) => void;
-  /** Bump the session revision without changing the modified flag. */
-  touchTab: (id: string) => void;
   setTabFormat: (
     id: string,
     patch: { encoding?: string; bom?: boolean; lineEnding?: LineEnding },
@@ -559,14 +874,18 @@ export interface AppStore {
   snapshotActive: () => void;
   replaceTabContent: (id: string, content: string, markClean?: boolean) => void;
 
-  openPath: (path: string, isPreview?: boolean) => Promise<void>;
+  openPath: (
+    path: string,
+    isPreview?: boolean,
+    basePath?: string,
+  ) => Promise<void>;
   openFileDialog: () => Promise<void>;
   openFileData: (data: FileData, isPreview?: boolean) => Tab | null;
   openFolder: () => Promise<void>;
   loadFolder: (path: string) => Promise<boolean>;
   refreshTree: () => Promise<void>;
   toggleFolder: (path: string) => Promise<void>;
-  revealActiveInTree: (path: string) => void;
+  revealActiveInTree: (path: string) => Promise<void>;
 
   setViewMode: (mode: ViewMode) => void;
   showSingleView: (view: SingleView) => void;
@@ -578,12 +897,11 @@ export interface AppStore {
   toggleZen: () => Promise<void>;
 
   updateSettings: (patch: Record<string, unknown>) => Promise<void>;
-  setHeadings: (headings: Heading[]) => void;
   refreshHeadings: () => void;
 
   handleFsEvent: (event: FsEvent) => Promise<void>;
   dismissBanner: (id: string) => void;
-  reloadTab: (id: string) => Promise<void>;
+  reloadTab: (id: string, force?: boolean) => Promise<void>;
 
   buildSession: () => SessionBuild;
   saveSession: () => Promise<void>;
@@ -637,7 +955,8 @@ export const useStore = create<AppStore>((set, get) => ({
     let settings = DEFAULT_SETTINGS;
     try {
       const loaded = await api.getSettings();
-      if (loaded) settings = deepMerge(DEFAULT_SETTINGS, loaded);
+      if (loaded)
+        settings = sanitizeSettings(deepMerge(DEFAULT_SETTINGS, loaded));
     } catch (error) {
       console.error("Failed to load settings", error);
     }
@@ -687,32 +1006,30 @@ export const useStore = create<AppStore>((set, get) => ({
               encoding: data.encoding ?? "UTF-8",
               bom: data.bom ?? defaultBom(data.encoding ?? "UTF-8"),
               lineEnding: normalizeLineEnding(data.line_ending),
-              mixedLineEndings: false,
+              mixedLineEndings: data.mixed_line_endings ?? false,
+              diskModifiedMs: data.disk_modified_ms ?? undefined,
             };
             order.push(id);
             tabRevisions.set(id, 0);
-            backedUpRevisions.delete(id);
+            if (data.modified) {
+              backedUpRevisions.delete(id);
+            } else {
+              // Clean tabs came from disk; there is no backup to rewrite on
+              // the first session save.
+              backedUpRevisions.set(id, 0);
+            }
           }
 
-          // Re-establish trust for the workspace and for files opened last
-          // time, otherwise Save would be rejected by the path validator.
-          const paths = order
-            .map((id) => tabs[id].path)
-            .filter((path): path is string => !!path);
-          try {
-            const workspaceRestore = await api.restoreWorkspace(
-              session.workspace_folder ?? null,
-              paths,
-            );
-            if (workspaceRestore?.workspace) {
-              set({
-                workspace: workspaceRestore.workspace,
-                tree: workspaceRestore.tree ?? [],
-                showWelcome: false,
-              });
-            }
-          } catch (error) {
-            console.warn("workspace restore failed", error);
+          // `load_session` already restored workspace trust and started the
+          // watcher, and it returns the scanned tree. Reusing that tree avoids
+          // a second full scan of the workspace at startup.
+          if (session.workspace_folder && session.tree) {
+            set({
+              workspace: session.workspace_folder,
+              tree: session.tree,
+              showWelcome: false,
+            });
+            restored = true;
           }
 
           const active =
@@ -781,6 +1098,7 @@ export const useStore = create<AppStore>((set, get) => ({
         opts.lineEnding ??
         normalizeLineEnding(fileSettings.default_line_ending),
       mixedLineEndings: opts.mixedLineEndings ?? false,
+      diskModifiedMs: opts.diskModifiedMs,
     };
     tabRevisions.set(id, 0);
     backedUpRevisions.delete(id);
@@ -811,7 +1129,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const closed = get().tabs[id];
     if (closed && !closed.isPreview) {
       set((current) => ({
-        closedTabs: [...current.closedTabs, closed].slice(-20),
+        closedTabs: trimClosedTabs([...current.closedTabs, closed]),
       }));
     }
 
@@ -886,14 +1204,45 @@ export const useStore = create<AppStore>((set, get) => ({
       get().activeId === id ? currentEditorContent() : tab.content;
 
     if (tab.path) {
-      try {
-        const result = await api.saveFile(
-          tab.path,
+      const path = tab.path;
+      const write = (expectedModifiedMs?: number | null) =>
+        api.saveFile(
+          path,
           content,
           tab.encoding,
           tab.bom,
           tab.lineEnding,
+          expectedModifiedMs === null
+            ? undefined
+            : (expectedModifiedMs ?? get().tabs[id]?.diskModifiedMs),
         );
+      try {
+        let result = await serializeFileSave(() => write());
+
+        if (result?.error === "conflict") {
+          const choice = await toast.choose(
+            `"${tab.filename}" changed on disk since it was opened. Overwrite it with the editor version?`,
+            {
+              saveText: "Overwrite",
+              discardText: "Reload from disk",
+              cancelText: "Cancel",
+            },
+          );
+          if (choice === "cancel") return false;
+          if (choice === "discard") {
+            await get().reloadTab(id, true);
+            return false;
+          }
+          result = await serializeFileSave(() => write(null));
+        } else if (result?.error === "missing") {
+          const recreate = await toast.confirm(
+            `"${tab.filename}" was removed on disk. Save the editor version and recreate it?`,
+            { confirmText: "Recreate", cancelText: "Cancel" },
+          );
+          if (!recreate) return false;
+          result = await serializeFileSave(() => write(null));
+        }
+
         if (result?.success) {
           set((state) => ({
             tabs: {
@@ -906,6 +1255,8 @@ export const useStore = create<AppStore>((set, get) => ({
                 encoding: result.encoding ?? state.tabs[id].encoding,
                 bom: result.bom ?? state.tabs[id].bom,
                 lineEnding: result.line_ending ?? state.tabs[id].lineEnding,
+                diskModifiedMs:
+                  result.modified_ms ?? state.tabs[id].diskModifiedMs,
               },
             },
           }));
@@ -1010,6 +1361,7 @@ export const useStore = create<AppStore>((set, get) => ({
             bom: data.bom ?? entry.bom,
             lineEnding: data.line_ending ?? entry.lineEnding,
             mixedLineEndings: data.mixed_line_endings ?? false,
+            diskModifiedMs: data.modified_ms ?? undefined,
           });
           toast.show(`Reopened ${entry.filename}`, {
             type: "success",
@@ -1063,10 +1415,6 @@ export const useStore = create<AppStore>((set, get) => ({
     set((state) => ({
       tabs: { ...state.tabs, [id]: { ...state.tabs[id], modified: true } },
     }));
-  },
-
-  touchTab: (id) => {
-    tabRevisions.set(id, (tabRevisions.get(id) ?? 0) + 1);
   },
 
   setTabFormat: (id, patch) => {
@@ -1129,12 +1477,8 @@ export const useStore = create<AppStore>((set, get) => ({
     const content =
       state.activeId === pending.tabId ? currentEditorContent() : tab.content;
     try {
-      const result = await api.saveFileAs(
-        pending.path,
-        content,
-        encoding,
-        bom,
-        lineEnding,
+      const result = await serializeFileSave(() =>
+        api.saveFileAs(pending.path, content, encoding, bom, lineEnding),
       );
       if (!result?.success) {
         toast.show(result?.message ?? result?.error ?? "Save failed", {
@@ -1161,6 +1505,8 @@ export const useStore = create<AppStore>((set, get) => ({
             encoding: result.encoding ?? encoding,
             bom: result.bom ?? bom,
             lineEnding: result.line_ending ?? lineEnding,
+            diskModifiedMs:
+              result.modified_ms ?? current.tabs[pending.tabId]?.diskModifiedMs,
           },
         },
       }));
@@ -1224,9 +1570,11 @@ export const useStore = create<AppStore>((set, get) => ({
     get().refreshHeadings();
   },
 
-  openPath: async (path, isPreview = false) => {
+  openPath: async (path, isPreview = false, basePath) => {
     try {
-      const data = await api.openFileByPath(path);
+      const data = basePath
+        ? await api.openFileLink(basePath, path)
+        : await api.openFileByPath(path);
       if (!data || data.error) {
         toast.show(data?.error ?? "Could not open file", { type: "error" });
         return;
@@ -1253,6 +1601,18 @@ export const useStore = create<AppStore>((set, get) => ({
     );
 
     if (existing) {
+      // Re-opening a file that is already open must never replace an edited
+      // buffer with the on-disk copy. Focus the tab and let the user decide
+      // through the file-change banner / explicit reload instead.
+      if (existing.modified) {
+        get().activate(existing.id);
+        toast.show(
+          `"${existing.filename}" is already open with unsaved changes.`,
+          { type: "warn", duration: 5000 },
+        );
+        return get().tabs[existing.id] ?? null;
+      }
+
       const content = normalizeNewlines(data.content ?? existing.content);
       tabRevisions.set(existing.id, (tabRevisions.get(existing.id) ?? 0) + 1);
       set((current) => ({
@@ -1268,6 +1628,8 @@ export const useStore = create<AppStore>((set, get) => ({
             mixedLineEndings:
               data.mixed_line_endings ??
               current.tabs[existing.id].mixedLineEndings,
+            diskModifiedMs:
+              data.modified_ms ?? current.tabs[existing.id].diskModifiedMs,
             isPreview: isPreview ? current.tabs[existing.id].isPreview : false,
           },
         },
@@ -1299,6 +1661,7 @@ export const useStore = create<AppStore>((set, get) => ({
       bom: data.bom,
       lineEnding: data.line_ending,
       mixedLineEndings: data.mixed_line_endings,
+      diskModifiedMs: data.modified_ms ?? undefined,
       isPreview,
     });
     if (isPreview) set({ previewTabId: id });
@@ -1312,18 +1675,30 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   loadFolder: async (path) => {
+    const requestSeq = ++treeRequestSeq;
     try {
       const result = await api.openFolder(path);
-      if (!result) return false;
+      if (requestSeq !== treeRequestSeq) return false;
+      if (!result || result.error) {
+        toast.show(result?.error ?? "Could not open folder", {
+          type: "error",
+        });
+        return false;
+      }
       set({
         workspace: result.path,
         tree: result.tree ?? [],
         expanded: {},
         showWelcome: false,
       });
+      treeErrorShown = false;
       return true;
     } catch (error) {
-      toast.show(`Could not open folder: ${String(error)}`, { type: "error" });
+      if (requestSeq === treeRequestSeq) {
+        toast.show(`Could not open folder: ${String(error)}`, {
+          type: "error",
+        });
+      }
       return false;
     }
   },
@@ -1332,15 +1707,27 @@ export const useStore = create<AppStore>((set, get) => ({
     const state = get();
     const workspace = state.workspace;
     if (!workspace) return;
+    const requestSeq = ++treeRequestSeq;
     const expandedPaths = Object.entries(state.expanded)
       .filter(([, open]) => open)
       .map(([path]) => path);
     try {
       const result = await api.getFolderTree(workspace, expandedPaths);
-      if (result) {
-        const tree = result.tree ?? [];
-        set({ tree, expanded: pruneExpanded(tree, get().expanded) });
+      if (requestSeq !== treeRequestSeq || get().workspace !== workspace) {
+        return;
       }
+      if (!result || result.error) {
+        if (!treeErrorShown) {
+          treeErrorShown = true;
+          toast.show(result?.error ?? "Could not refresh the folder tree", {
+            type: "error",
+          });
+        }
+        return;
+      }
+      treeErrorShown = false;
+      const tree = result.tree ?? [];
+      set({ tree, expanded: pruneExpanded(tree, get().expanded) });
     } catch {
       /* folder may have been removed */
     }
@@ -1357,35 +1744,59 @@ export const useStore = create<AppStore>((set, get) => ({
     if (node && (!node.children || node.children.length === 0)) {
       try {
         const children = await api.getFolderChildren(path);
+        if (!Array.isArray(children)) {
+          toast.show(children?.error ?? "Could not load the folder contents", {
+            type: "error",
+          });
+          return;
+        }
         set((current) => ({
           tree: mapNode(current.tree, path, (item) => ({
             ...item,
-            children: children ?? [],
+            children,
           })),
         }));
-      } catch {
-        /* ignore */
+      } catch (error) {
+        toast.show(`Could not load the folder: ${String(error)}`, {
+          type: "error",
+        });
+        return;
       }
     }
     set((current) => ({ expanded: { ...current.expanded, [path]: true } }));
   },
 
-  revealActiveInTree: (path) => {
+  revealActiveInTree: async (path) => {
     const { workspace, expanded } = get();
     if (!workspace) return;
-    const root = normalizePath(workspace);
+    const root = normalizePath(workspace).replace(/\/+$/, "");
     const target = normalizePath(path);
-    if (!target.startsWith(root)) return;
-    const parts = target.slice(root.length + 1).split("/");
+    if (!target.startsWith(`${root}/`)) return;
+    // Keep the original on-disk case for `expanded` keys: the Rust scanner
+    // compares them case-sensitively against display paths from read_dir.
+    const original = path.replace(/\\/g, "/");
+    const originalRoot = workspace.replace(/\\/g, "/").replace(/\/+$/, "");
+    const parts = original.slice(originalRoot.length + 1).split("/");
     parts.pop();
     const next = { ...expanded };
-    let cursor = workspace.replace(/\\/g, "/");
+    let cursor = originalRoot;
     for (const part of parts) {
       cursor = `${cursor}/${part}`;
       next[cursor] = true;
       next[cursor.replace(/\//g, "\\")] = true;
     }
     set({ expanded: next });
+    // The expanded set only tells the backend which branches to scan; the
+    // children are not in the tree until a scoped refresh completes.
+    await get().refreshTree();
+    window.setTimeout(() => {
+      const targetNode = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-tree-path]"),
+      ).find(
+        (element) => normalizePath(element.dataset.treePath ?? "") === target,
+      );
+      targetNode?.scrollIntoView({ block: "nearest" });
+    }, 0);
   },
 
   setViewMode: (mode) => {
@@ -1407,8 +1818,14 @@ export const useStore = create<AppStore>((set, get) => ({
 
   toggleSidebar: () => {
     const next = !get().sidebarVisible;
-    set({ sidebarVisible: next });
-    void api.saveSettings({ appearance: { sidebar_visible: next } });
+    set((state) => ({
+      sidebarVisible: next,
+      settings: {
+        ...state.settings,
+        appearance: { ...state.settings.appearance, sidebar_visible: next },
+      },
+    }));
+    void persistSettings({ appearance: { sidebar_visible: next } });
   },
 
   togglePreview: () => {
@@ -1417,7 +1834,15 @@ export const useStore = create<AppStore>((set, get) => ({
         singleView: get().singleView === "preview" ? "editor" : "preview",
       });
     } else {
-      set({ previewVisible: !get().previewVisible });
+      const next = !get().previewVisible;
+      set((state) => ({
+        previewVisible: next,
+        settings: {
+          ...state.settings,
+          appearance: { ...state.settings.appearance, preview_visible: next },
+        },
+      }));
+      void persistSettings({ appearance: { preview_visible: next } });
     }
   },
 
@@ -1430,7 +1855,7 @@ export const useStore = create<AppStore>((set, get) => ({
         appearance: { ...get().settings.appearance, theme },
       },
     });
-    void api.saveSettings({ appearance: { theme } });
+    void persistSettings({ appearance: { theme } });
   },
 
   setSidebarWidth: (width) => {
@@ -1456,22 +1881,50 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   updateSettings: async (patch) => {
-    const merged = deepMerge(get().settings, patch);
+    const merged = sanitizeSettings(deepMerge(get().settings, patch));
+    const appearancePatch = (patch as { appearance?: Record<string, unknown> })
+      .appearance;
     set({
       settings: merged,
       theme: merged.appearance.theme,
-      sidebarVisible: merged.appearance.sidebar_visible !== false,
-      previewVisible: merged.appearance.preview_visible !== false,
-      sidebarWidth: merged.appearance.sidebar_width || 250,
+      // Only apply layout fields that this patch actually changed. Otherwise an
+      // unrelated settings edit would reset a transient collapsed sidebar or
+      // hidden preview back to the values captured at mount time.
+      ...(appearancePatch && "sidebar_visible" in appearancePatch
+        ? { sidebarVisible: merged.appearance.sidebar_visible !== false }
+        : {}),
+      ...(appearancePatch && "preview_visible" in appearancePatch
+        ? { previewVisible: merged.appearance.preview_visible !== false }
+        : {}),
+      ...(appearancePatch && "sidebar_width" in appearancePatch
+        ? { sidebarWidth: merged.appearance.sidebar_width || 250 }
+        : {}),
     });
-    try {
-      await api.saveSettings(patch);
-    } catch (error) {
-      console.error("Failed to save settings", error);
+
+    const filesPatch = (patch as { files?: Record<string, unknown> }).files;
+    if (
+      filesPatch &&
+      [
+        "visible_extensions",
+        "show_hidden_files",
+        "exclude_patterns",
+        "folders_first",
+      ].some((key) => key in filesPatch)
+    ) {
+      // Refresh only after the patch has reached Rust; otherwise the scan
+      // still sees the old extension/exclude settings.
+      refreshTreeAfterSettings = true;
+    }
+    queueSettingsPersist(patch);
+
+    if (filesPatch && "show_hidden_files" in filesPatch) {
+      // The watcher reads show_hidden_files from Rust state, so persist the
+      // patch before asking it to restart.
+      void flushSettingsPersist()
+        .then(() => api.restartWatcher())
+        .catch(() => undefined);
     }
   },
-
-  setHeadings: (headings) => set({ headings }),
 
   refreshHeadings: () => {
     const state = get();
@@ -1500,7 +1953,12 @@ export const useStore = create<AppStore>((set, get) => ({
       }
     }
 
-    if (event.type !== "modified" || event.is_directory) return;
+    if (
+      event.is_directory ||
+      (event.type !== "modified" && event.type !== "deleted")
+    ) {
+      return;
+    }
 
     const target = normalizePath(event.path);
     const affected = Object.values(state.tabs).filter(
@@ -1509,7 +1967,10 @@ export const useStore = create<AppStore>((set, get) => ({
     for (const tab of affected) {
       const banner: Banner = {
         id: `${tab.id}_${Date.now()}`,
-        message: `${tab.filename} changed on disk.`,
+        message:
+          event.type === "deleted"
+            ? `${tab.filename} was removed on disk.`
+            : `${tab.filename} changed on disk.`,
         tabId: tab.id,
         path: tab.path!,
       };
@@ -1522,9 +1983,16 @@ export const useStore = create<AppStore>((set, get) => ({
   dismissBanner: (id) =>
     set((state) => ({ banners: state.banners.filter((b) => b.id !== id) })),
 
-  reloadTab: async (id) => {
+  reloadTab: async (id, force = false) => {
     const tab = get().tabs[id];
     if (!tab?.path) return;
+    if (tab.modified && !force) {
+      const proceed = await toast.confirm(
+        `Reload "${tab.filename}" from disk and discard unsaved changes?`,
+        { confirmText: "Reload", cancelText: "Cancel" },
+      );
+      if (!proceed) return;
+    }
     try {
       const data = await api.openFileByPath(tab.path);
       if (data?.error) {
@@ -1533,6 +2001,18 @@ export const useStore = create<AppStore>((set, get) => ({
       }
       get().replaceTabContent(id, data.content ?? "", true);
       set((state) => ({
+        tabs: {
+          ...state.tabs,
+          [id]: {
+            ...state.tabs[id],
+            encoding: data.encoding ?? state.tabs[id].encoding,
+            bom: data.bom ?? state.tabs[id].bom,
+            lineEnding: data.line_ending ?? state.tabs[id].lineEnding,
+            mixedLineEndings:
+              data.mixed_line_endings ?? state.tabs[id].mixedLineEndings,
+            diskModifiedMs: data.modified_ms ?? state.tabs[id].diskModifiedMs,
+          },
+        },
         banners: state.banners.filter((b) => b.tabId !== id),
       }));
       if (get().activeId === id) get().refreshHeadings();
@@ -1566,6 +2046,7 @@ export const useStore = create<AppStore>((set, get) => ({
         encoding: tab.encoding,
         bom: tab.bom,
         line_ending: tab.lineEnding,
+        disk_modified_ms: tab.diskModifiedMs ?? null,
       };
       if (dirty) {
         entry.content = hydrated ? currentEditorContent() : tab.content;
@@ -1574,7 +2055,33 @@ export const useStore = create<AppStore>((set, get) => ({
       tabs[id] = entry;
     }
 
-    const metaHash = sessionMetaHash(state);
+    const metaHash = hashString(
+      JSON.stringify({
+        order: state.order,
+        active: state.activeId,
+        workspace: state.workspace,
+        sidebarWidth: state.sidebarWidth,
+        sidebarVisible: state.sidebarVisible,
+        // Cursor/scroll/modified/format changes are session metadata too. If
+        // they are omitted, save_merged's meta-hash fast path keeps writing
+        // stale values until the document content changes.
+        tabs: state.order.map((tabId) => {
+          const entry = tabs[tabId] as Record<string, unknown> | undefined;
+          return [
+            tabId,
+            entry?.path,
+            entry?.filename,
+            entry?.modified,
+            entry?.cursor_pos,
+            entry?.scroll_top,
+            entry?.encoding,
+            entry?.bom,
+            entry?.line_ending,
+            entry?.disk_modified_ms,
+          ];
+        }),
+      }),
+    );
     return {
       payload: {
         version: 2,
@@ -1591,29 +2098,36 @@ export const useStore = create<AppStore>((set, get) => ({
     };
   },
 
-  saveSession: async () => {
-    if (sessionSaving) return;
+  saveSession: () => {
+    // Coalesce concurrent callers (interval, beforeunload, close handshake)
+    // onto the same in-flight write instead of silently dropping the request.
+    if (sessionSavePromise) return sessionSavePromise;
     const { payload, dirtyIds, metaHash } = get().buildSession();
-    if (dirtyIds.length === 0 && metaHash === lastSavedMetaHash) return;
+    if (dirtyIds.length === 0 && metaHash === lastSavedMetaHash) {
+      return Promise.resolve();
+    }
 
     const revisions = new Map<string, number>();
     for (const id of dirtyIds) {
       revisions.set(id, tabRevisions.get(id) ?? 0);
     }
 
-    sessionSaving = true;
-    try {
-      const ok = await api.saveSession(payload);
-      if (!ok) return;
-      for (const [id, revision] of revisions) {
-        backedUpRevisions.set(id, revision);
+    const pending = (async () => {
+      try {
+        const ok = await api.saveSession(payload);
+        if (!ok) return;
+        for (const [id, revision] of revisions) {
+          backedUpRevisions.set(id, revision);
+        }
+        lastSavedMetaHash = metaHash;
+      } catch (error) {
+        console.error("Failed to save session", error);
+      } finally {
+        sessionSavePromise = null;
       }
-      lastSavedMetaHash = metaHash;
-    } catch (error) {
-      console.error("Failed to save session", error);
-    } finally {
-      sessionSaving = false;
-    }
+    })();
+    sessionSavePromise = pending;
+    return pending;
   },
 }));
 

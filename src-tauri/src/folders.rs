@@ -217,7 +217,7 @@ fn scan(dir: &Path, cfg: &ScanConfig, depth: usize, max_depth: usize) -> Vec<Tre
 
 pub fn create_file(folder: &Path, filename: &str) -> Value {
     let mut name = filename.trim().to_string();
-    if !name.to_lowercase().ends_with(".md") {
+    if Path::new(&name).extension().is_none() {
         name.push_str(".md");
     }
     let Some(name) = validate_filename(&name, None) else {
@@ -334,14 +334,22 @@ pub fn move_item(src: &Path, dest_folder: &Path) -> Value {
             // Cross-volume move: fall back to copy + delete.
             if src.is_file() {
                 match std::fs::copy(src, &target) {
-                    Ok(_) => {
-                        let _ = std::fs::remove_file(src);
-                        return json!({
-                            "success": true,
-                            "old_path": display_path(src),
-                            "new_path": display_path(&target)
-                        });
-                    }
+                    Ok(_) => match std::fs::remove_file(src) {
+                        Ok(_) => {
+                            return json!({
+                                "success": true,
+                                "old_path": display_path(src),
+                                "new_path": display_path(&target)
+                            });
+                        }
+                        Err(remove_err) => {
+                            return json!({
+                                "error": format!(
+                                    "Copied to the destination, but could not remove the source: {remove_err}"
+                                )
+                            });
+                        }
+                    },
                     Err(copy_err) => return json!({ "error": copy_err.to_string() }),
                 }
             }

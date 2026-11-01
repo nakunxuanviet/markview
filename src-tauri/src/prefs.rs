@@ -36,7 +36,7 @@ pub fn default_settings() -> Value {
             "auto_save_interval": 30,
             "default_encoding": "UTF-8",
             "default_line_ending": "lf",
-            "visible_extensions": [".md", ".markdown", ".mdx", ".txt", ".xlsx", ".xls", ".docx", ".doc", ".pdf", ".pptx", ".csv"],
+            "visible_extensions": [".md", ".markdown", ".mdx", ".txt"],
             "show_hidden_files": false,
             "folders_first": true,
             "folder_label_segments": 2,
@@ -162,25 +162,37 @@ impl SettingsStore {
             .unwrap_or(fallback)
     }
 
-    pub fn update(&mut self, patch: &Value) {
+    pub fn update(&mut self, patch: &Value) -> bool {
         deep_merge(&mut self.value, patch);
-        self.save();
+        self.save()
     }
 
-    pub fn add_recent_file(&mut self, path: &str) {
+    pub fn add_recent_file(&mut self, path: &str) -> bool {
         add_recent(&mut self.value, "recent_files", path, 20);
-        self.save();
+        self.save()
     }
 
-    pub fn add_recent_folder(&mut self, path: &str) {
+    pub fn add_recent_folder(&mut self, path: &str) -> bool {
         add_recent(&mut self.value, "recent_folders", path, 10);
-        self.save();
+        self.save()
     }
 
-    fn save(&self) {
-        if let Ok(text) = serde_json::to_string_pretty(&self.value) {
-            let _ = std::fs::write(&self.path, text);
+    /// Write through a sibling temp file and rename, so a crash mid-write
+    /// cannot leave a truncated settings.json (which would reset every
+    /// preference and the recent-file history on the next launch).
+    fn save(&self) -> bool {
+        let Ok(text) = serde_json::to_string_pretty(&self.value) else {
+            return false;
+        };
+        let tmp = self.path.with_extension("json.tmp");
+        if std::fs::write(&tmp, text).is_err() {
+            return false;
         }
+        if std::fs::rename(&tmp, &self.path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            return false;
+        }
+        true
     }
 }
 
@@ -452,19 +464,51 @@ impl SessionStore {
                     .get("modified")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
-                let disk = || {
-                    path.as_deref()
-                        .and_then(|p| std::fs::read_to_string(p).ok())
-                };
-                let content = if modified {
-                    self.read_backup(tab_id).or_else(disk)
+                let backup = self.read_backup(tab_id);
+                // A dirty tab restores from its backup; there is no reason to
+                // read (and decode) the on-disk file first.
+                let disk_data = if modified && backup.is_some() {
+                    None
                 } else {
-                    // A clean tab should reflect external edits made while the
-                    // app was closed; the backup is only a fallback.
-                    disk().or_else(|| self.read_backup(tab_id))
-                }
-                .unwrap_or_default();
+                    path.as_deref().and_then(|p| {
+                        let data = crate::files::read_file_data(Path::new(p));
+                        if data.get("error").is_none() {
+                            Some(data)
+                        } else {
+                            None
+                        }
+                    })
+                };
+                let disk_content = disk_data
+                    .as_ref()
+                    .and_then(|data| data.get("content"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let (content, from_disk) = if modified {
+                    if let Some(content) = backup {
+                        (content, false)
+                    } else {
+                        let from_disk = disk_content.is_some();
+                        (disk_content.unwrap_or_default(), from_disk)
+                    }
+                } else if let Some(content) = disk_content {
+                    (content, true)
+                } else {
+                    (backup.unwrap_or_default(), false)
+                };
                 tab_obj.insert("content".to_string(), Value::String(content));
+                if from_disk {
+                    if let Some(data) = &disk_data {
+                        for key in ["encoding", "bom", "line_ending", "mixed_line_endings"] {
+                            if let Some(value) = data.get(key) {
+                                tab_obj.insert(key.to_string(), value.clone());
+                            }
+                        }
+                        if let Some(value) = data.get("modified_ms") {
+                            tab_obj.insert("disk_modified_ms".to_string(), value.clone());
+                        }
+                    }
+                }
             }
         }
         Some(session)
@@ -546,6 +590,102 @@ mod tests {
         });
         assert!(store.save_merged(&third));
         assert!(!store.backup_path("tab_2").exists(), "closed tab pruned");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_updates_are_atomic_and_persist() {
+        let dir = temp_dir("settings-atomic");
+        let mut store = SettingsStore::new(&dir);
+        assert!(store.update(&json!({ "appearance": { "theme": "light" } })));
+        assert_eq!(
+            store.get("appearance.theme").and_then(Value::as_str),
+            Some("light")
+        );
+        assert!(!dir.join("settings.json.tmp").exists());
+
+        let reloaded = SettingsStore::new(&dir);
+        assert_eq!(
+            reloaded.get("appearance.theme").and_then(Value::as_str),
+            Some("light")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn metadata_only_session_save_is_persisted() {
+        let dir = temp_dir("session-meta");
+        let store = SessionStore::new(&dir);
+        let first = json!({
+            "version": 2,
+            "meta_hash": "h1",
+            "tabs": {
+                "tab_1": { "path": null, "filename": "a", "modified": false, "cursor_pos": 1, "scroll_top": 0 }
+            },
+            "tab_order": ["tab_1"],
+            "active_tab": "tab_1"
+        });
+        assert!(store.save_merged(&first));
+
+        let second = json!({
+            "version": 2,
+            "meta_hash": "h2",
+            "tabs": {
+                "tab_1": { "path": null, "filename": "a", "modified": true, "cursor_pos": 7, "scroll_top": 42 }
+            },
+            "tab_order": ["tab_1"],
+            "active_tab": "tab_1"
+        });
+        assert!(store.save_merged(&second));
+        let raw: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("session.json")).expect("session"),
+        )
+        .expect("json");
+        assert_eq!(raw["tabs"]["tab_1"]["cursor_pos"], 7);
+        assert_eq!(raw["tabs"]["tab_1"]["scroll_top"], 42);
+        assert_eq!(raw["tabs"]["tab_1"]["modified"], true);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clean_utf16_tab_restores_decoded_content() {
+        let dir = temp_dir("session-utf16");
+        let store = SessionStore::new(&dir);
+        let file = dir.join("doc.md");
+        let write = crate::files::write_file_data(
+            &file,
+            "héllo\n",
+            Some("UTF-16 LE"),
+            Some(true),
+            Some("lf"),
+        );
+        assert_eq!(write["success"], true);
+
+        let payload = json!({
+            "version": 2,
+            "meta_hash": "h1",
+            "tabs": {
+                "tab_1": {
+                    "path": display_path(&file),
+                    "filename": "doc.md",
+                    "modified": false
+                }
+            },
+            "tab_order": ["tab_1"],
+            "active_tab": "tab_1",
+            "workspace_folder": null
+        });
+        assert!(store.save_merged(&payload));
+        let session = store.load().expect("session");
+        assert_eq!(
+            session["tabs"]["tab_1"]["content"].as_str(),
+            Some("héllo\n")
+        );
+        assert_eq!(
+            session["tabs"]["tab_1"]["encoding"].as_str(),
+            Some("UTF-16 LE")
+        );
+        assert_eq!(session["tabs"]["tab_1"]["bom"].as_bool(), Some(true));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

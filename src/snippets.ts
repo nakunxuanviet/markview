@@ -1,4 +1,8 @@
-import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
+import type {
+  Completion,
+  CompletionContext,
+  CompletionResult,
+} from "@codemirror/autocomplete";
 
 /**
  * Snippet templates ported from the original `snippets.js`.
@@ -23,7 +27,8 @@ export const SNIPPETS: Record<string, string> = {
   sql: "```sql\n${1}\n```",
   java: "```java\n${1}\n```",
 
-  table: "| ${1:Column 1} | ${2:Column 2} | ${3:Column 3} |\n|---|---|---|\n| ${4} | ${5} | ${6} |",
+  table:
+    "| ${1:Column 1} | ${2:Column 2} | ${3:Column 3} |\n|---|---|---|\n| ${4} | ${5} | ${6} |",
   table2x2: "| ${1:Col 1} | ${2:Col 2} |\n|---|---|\n| ${3} | ${4} |",
   table3x3:
     "| ${1:Col 1} | ${2:Col 2} | ${3:Col 3} |\n|---|---|---|\n| ${4} | ${5} | ${6} |\n| ${7} | ${8} | ${9} |",
@@ -37,8 +42,10 @@ export const SNIPPETS: Record<string, string> = {
   quote: "> ${1:quote}",
   hr: "\n---\n",
 
-  details: "<details>\n<summary>${1:Summary}</summary>\n\n${2:Content}\n\n</details>",
-  badge: "![${1:badge}](https://img.shields.io/badge/${2:label}-${3:message}-${4:blue})",
+  details:
+    "<details>\n<summary>${1:Summary}</summary>\n\n${2:Content}\n\n</details>",
+  badge:
+    "![${1:badge}](https://img.shields.io/badge/${2:label}-${3:message}-${4:blue})",
 
   checkbox: "- [ ] ${1:Task}",
   checked: "- [x] ${1:Task}",
@@ -48,7 +55,10 @@ export const SNIPPETS: Record<string, string> = {
   toc: "## Table of Contents\n\n${1:- [Section](#section)}",
 };
 
-export function buildSnippet(template: string): { text: string; cursor: number } {
+export function buildSnippet(template: string): {
+  text: string;
+  cursor: number;
+} {
   let out = "";
   let cursor = -1;
   let last = 0;
@@ -65,13 +75,22 @@ export function buildSnippet(template: string): { text: string; cursor: number }
   return { text: out, cursor: cursor < 0 ? out.length : cursor };
 }
 
+function snippetTemplate(key: string): string {
+  if (key === "date") {
+    // Evaluate at completion time, not at module load.
+    return `\${1:${new Date().toISOString().slice(0, 10)}}`;
+  }
+  return SNIPPETS[key];
+}
+
 function makeCompletion(key: string): Completion {
-  const { text, cursor } = buildSnippet(SNIPPETS[key]);
+  const template = snippetTemplate(key);
+  const { text, cursor } = buildSnippet(template);
   return {
     label: key,
     detail: "snippet",
     type: "keyword",
-    info: SNIPPETS[key].replace(/\$\{\d+(?::([^}]*))?\}/g, "$1"),
+    info: template.replace(/\$\{\d+(?::([^}]*))?\}/g, "$1"),
     apply: (view, _completion, from, to) => {
       view.dispatch({
         changes: { from, to, insert: text },
@@ -84,6 +103,8 @@ function makeCompletion(key: string): Completion {
 
 const CACHE = new Map<string, Completion>();
 function completionFor(key: string): Completion {
+  // The date snippet must be rebuilt so it is not stuck at the launch date.
+  if (key === "date") return makeCompletion(key);
   let item = CACHE.get(key);
   if (!item) {
     item = makeCompletion(key);
@@ -92,14 +113,17 @@ function completionFor(key: string): Completion {
   return item;
 }
 
-export function snippetSource(context: CompletionContext): CompletionResult | null {
+export function snippetSource(
+  context: CompletionContext,
+): CompletionResult | null {
   const word = context.matchBefore(/[a-zA-Z][\w-]*/);
   if (!word) return null;
   const lower = word.text.toLowerCase();
   const keys = Object.keys(SNIPPETS).filter((key) => key.startsWith(lower));
   if (keys.length === 0) return null;
-  // Do not hijack ordinary words; only exact snippet names or short prefixes.
-  if (word.text.length > 1 && keys.length === 0) return null;
+  // Avoid hijacking ordinary prose: one-letter prefixes only autocomplete when
+  // they are themselves an exact snippet name.
+  if (word.text.length < 2 && !keys.includes(word.text)) return null;
   return {
     from: word.from,
     options: keys.map(completionFor),

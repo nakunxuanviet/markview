@@ -3,6 +3,8 @@ import katex from "katex";
 import exportCss from "../styles/export.css?inline";
 import hljsDark from "highlight.js/styles/github-dark.css?inline";
 import hljsLight from "highlight.js/styles/github.css?inline";
+import { editorRef } from "../editorRef";
+import { previewCacheKey } from "../previewCache";
 import { useStore } from "../store";
 
 export interface ExportOptions {
@@ -29,19 +31,26 @@ function fileToDataUrl(blob: Blob): Promise<string> {
 }
 
 function isPlaceholder(root: HTMLElement, tabId: string): boolean {
-  const text = root.textContent ?? "";
-  return (
-    root.dataset.previewTab !== tabId ||
-    root.innerHTML.trim() === "" ||
-    text.includes("Preview will appear here") ||
-    text.includes("Preview is disabled")
-  );
+  if (root.dataset.previewTab !== tabId) return true;
+  return root.dataset.previewRendered !== "true";
 }
 
-function restoreMode(mode: "single" | "split", single: "editor" | "preview") {
+function restoreMode(
+  mode: "single" | "split",
+  single: "editor" | "preview",
+  previewVisible: boolean,
+) {
   const store = useStore.getState();
-  if (mode === "single") store.showSingleView(single);
-  else store.setViewMode("split");
+  if (mode === "single") {
+    store.showSingleView(single);
+    useStore.setState({ previewVisible });
+  } else {
+    useStore.setState({ viewMode: "split", previewVisible });
+  }
+}
+
+function exportSourceKey(tabId: string, path: string | null, text: string) {
+  return previewCacheKey("doc", `${tabId}\u0000${path ?? ""}\u0000${text}`);
 }
 
 /**
@@ -54,30 +63,62 @@ export async function buildExportHtml(options: ExportOptions): Promise<string> {
   const tab = state.activeId ? state.tabs[state.activeId] : null;
   if (!tab) throw new Error("No active document");
 
+  const currentText =
+    state.editorTabId === tab.id && editorRef.view
+      ? editorRef.view.state.doc.toString()
+      : tab.content;
+  const expectedKey = exportSourceKey(tab.id, tab.path, currentText);
+
   let panel = document.getElementById("preview-content");
   if (!panel) throw new Error("Preview is not available");
 
-  if (isPlaceholder(panel, tab.id)) {
-    if ((panel.textContent ?? "").includes("Preview is disabled")) {
+  if (
+    panel.dataset.previewSource !== expectedKey ||
+    isPlaceholder(panel, tab.id)
+  ) {
+    if (panel.dataset.previewDisabled === "true") {
       throw new Error(
         "Preview is disabled for this large document. Open Read mode and render it first.",
       );
     }
     const previousMode = state.viewMode;
     const previousSingle = state.singleView;
+    const previousPreviewVisible = state.previewVisible;
     if (previousMode === "single" && previousSingle === "editor") {
       state.setViewMode("split");
+    } else if (previousMode === "split" && !state.previewVisible) {
+      useStore.setState({ previewVisible: true });
     }
+
+    // Let React activate the preview before asking it to render.
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    window.dispatchEvent(new Event("markview:preview-update"));
 
     const deadline = Date.now() + 5000;
+    let disabled = false;
+    let lastKick = Date.now();
     while (Date.now() < deadline) {
-      await new Promise((resolve) => window.setTimeout(resolve, 120));
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
       panel = document.getElementById("preview-content");
-      if (panel && !isPlaceholder(panel, tab.id)) break;
+      if (!panel) continue;
+      if (panel.dataset.previewDisabled === "true") {
+        disabled = true;
+        break;
+      }
+      if (panel.dataset.previewSource === expectedKey) break;
+      if (Date.now() - lastKick >= 500) {
+        lastKick = Date.now();
+        window.dispatchEvent(new Event("markview:preview-update"));
+      }
     }
 
-    restoreMode(previousMode, previousSingle);
-    if (!panel || isPlaceholder(panel, tab.id)) {
+    restoreMode(previousMode, previousSingle, previousPreviewVisible);
+    if (disabled) {
+      throw new Error(
+        "Preview is disabled for this large document. Open Read mode and render it first.",
+      );
+    }
+    if (!panel || panel.dataset.previewSource !== expectedKey) {
       throw new Error("Preview is still rendering. Try again in a moment.");
     }
   }

@@ -25,6 +25,39 @@ pub struct SearchOptions {
     pub exclude: String,
 }
 
+/// Settings values needed by a search, copied out while the settings lock is
+/// held. The search itself must never keep that lock across filesystem work.
+pub struct SearchConfig {
+    pub exclude_patterns: Vec<String>,
+    pub extensions: Vec<String>,
+}
+
+impl SearchConfig {
+    pub fn from_settings(settings: &SettingsStore) -> Self {
+        Self {
+            exclude_patterns: settings.get_str_list("files.exclude_patterns"),
+            extensions: settings.get_string_list_or(
+                "files.visible_extensions",
+                &[".md", ".markdown", ".mdx", ".txt"],
+            ),
+        }
+    }
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            exclude_patterns: Vec::new(),
+            extensions: vec![
+                ".md".into(),
+                ".markdown".into(),
+                ".mdx".into(),
+                ".txt".into(),
+            ],
+        }
+    }
+}
+
 fn split_patterns(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(|s| s.trim().to_string())
@@ -89,7 +122,7 @@ pub fn search_in_files_cancellable(
     root: &Path,
     query: &str,
     folder: Option<&Path>,
-    settings: &SettingsStore,
+    config: &SearchConfig,
     opts: &SearchOptions,
     generation: &AtomicU64,
     request_id: u64,
@@ -115,16 +148,13 @@ pub fn search_in_files_cancellable(
         .filter_map(|p| Pattern::new(p).ok())
         .collect();
     let mut exclude_raw = split_patterns(&opts.exclude);
-    exclude_raw.extend(settings.get_str_list("files.exclude_patterns"));
+    exclude_raw.extend(config.exclude_patterns.iter().cloned());
     let exclude_patterns: Vec<Pattern> = exclude_raw
         .iter()
         .filter_map(|p| Pattern::new(p).ok())
         .collect();
 
-    let extensions = settings.get_string_list_or(
-        "files.visible_extensions",
-        &[".md", ".markdown", ".mdx", ".txt"],
-    );
+    let extensions = &config.extensions;
 
     let mut results = Vec::new();
 

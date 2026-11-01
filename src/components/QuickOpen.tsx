@@ -15,7 +15,6 @@ export function QuickOpen() {
   const [results, setResults] = useState<FileHit[]>([]);
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -27,7 +26,7 @@ export function QuickOpen() {
 
   useEffect(() => {
     if (!open) return;
-    if (timer.current) window.clearTimeout(timer.current);
+    let cancelled = false;
 
     if (mode === "recent") {
       const needle = query.trim().toLowerCase();
@@ -45,24 +44,30 @@ export function QuickOpen() {
         );
       setResults(hits);
       setSelected(0);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     if (!query.trim()) {
       setResults([]);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
-    timer.current = window.setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       try {
         const hits = await api.searchFilenames(query.trim());
+        if (cancelled) return;
         setResults(hits ?? []);
         setSelected(0);
       } catch {
-        setResults([]);
+        if (!cancelled) setResults([]);
       }
     }, 120);
     return () => {
-      if (timer.current) window.clearTimeout(timer.current);
+      cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [query, open, mode, recentFiles, workspace]);
 
@@ -71,8 +76,11 @@ export function QuickOpen() {
   const choose = (hit: FileHit | undefined) => {
     if (!hit) return;
     useStore.setState({ quickOpenOpen: false });
-    void useStore.getState().openPath(hit.path, false);
-    useStore.getState().revealActiveInTree(hit.path);
+    void useStore
+      .getState()
+      .openPath(hit.path, false)
+      .then(() => useStore.getState().revealActiveInTree(hit.path))
+      .catch(() => undefined);
   };
 
   const close = () => useStore.setState({ quickOpenOpen: false });

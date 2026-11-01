@@ -7,13 +7,12 @@
 //!   * a file the user explicitly opened (trusted files) — file access only,
 //!   * the `assets` sibling directory of a trusted file — image writes only.
 
-use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 use crate::state::AppState;
 
-pub const MAX_TRUSTED_FILES: usize = 500;
-pub const MAX_TRUSTED_FOLDERS: usize = 100;
+pub const MAX_TRUSTED_FILES: usize = 4096;
+pub const MAX_TRUSTED_FOLDERS: usize = 512;
 
 /// Lexically resolve `.` / `..` without touching the filesystem.
 fn normalize_lexical(path: &Path) -> PathBuf {
@@ -103,6 +102,82 @@ pub fn is_within(candidate: &Path, root: &Path) -> bool {
     !root.as_os_str().is_empty() && candidate.starts_with(root)
 }
 
+fn is_device_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    text.starts_with(r"\\?\") || text.starts_with(r"\\.\")
+}
+
+fn starts_with_double_separator(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= 2 && matches!(bytes[0], b'/' | b'\\') && matches!(bytes[1], b'/' | b'\\')
+}
+
+/// Protocol-relative and mixed-separator forms are never produced by a native
+/// Windows dialog. Backslash UNC (`\\server\share`) is left to the trusted-root
+/// check so network folders opened by the user keep working.
+fn starts_with_forward_or_mixed_separator(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() >= 2
+        && ((bytes[0] == b'/' && matches!(bytes[1], b'/' | b'\\'))
+            || (bytes[0] == b'\\' && bytes[1] == b'/'))
+}
+
+fn is_unc_path(path: &Path) -> bool {
+    starts_with_double_separator(&path.to_string_lossy())
+}
+
+/// Case-insensitive normalized key used only for the pre-canonicalization UNC
+/// check. Windows share names and paths are case-insensitive, and the webview
+/// may spell the same share differently from the canonical trusted root.
+fn normalized_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
+fn is_within_unc(candidate: &Path, root: &Path) -> bool {
+    let candidate = normalized_key(candidate);
+    let root = normalized_key(root);
+    !root.is_empty() && (candidate == root || candidate.starts_with(&format!("{root}/")))
+}
+
+fn is_same_unc(candidate: &Path, file: &Path) -> bool {
+    normalized_key(candidate) == normalized_key(file)
+}
+
+/// An image write/read is allowed when it lives under an `assets` directory
+/// whose parent also contains a trusted document. This replaces scanning every
+/// trusted file and canonicalizing its `assets` sibling on every image
+/// request, which was O(trusted files) filesystem calls per image.
+fn is_assets_sibling_of_trusted_file(state: &AppState, candidate: &Path) -> bool {
+    let mut dir = Some(candidate);
+    while let Some(current) = dir {
+        if current.file_name().and_then(|name| name.to_str()) == Some("assets") {
+            let Some(document_dir) = current.parent() else {
+                return false;
+            };
+            let Ok(files) = state.trusted_files.lock() else {
+                return false;
+            };
+            return files.iter().any(|file| file.parent() == Some(document_dir));
+        }
+        dir = current.parent();
+    }
+    false
+}
+
+/// Paths that must never be accepted directly from the webview. Forward-slash
+/// UNC paths (`//host/share`) are treated as network-path references by
+/// browsers/HTML and can trigger an SMB authentication attempt before any
+/// trusted-root check; device paths are never valid document paths.
+pub fn is_webview_unsafe_path(raw: &str) -> bool {
+    let text = raw.trim_start();
+    starts_with_forward_or_mixed_separator(text)
+        || text.starts_with(r"\\?\")
+        || text.starts_with(r"\\.\")
+}
+
 /// Validate a JS supplied path.
 pub fn validate_path(
     state: &AppState,
@@ -119,12 +194,14 @@ pub fn validate_path(
     if !raw_path.is_absolute() {
         return None;
     }
-    if must_exist && !raw_path.exists() {
+    if is_device_path(raw_path) {
         return None;
     }
 
-    let candidate = real_path(raw_path);
-
+    // Build the cheap roots before touching the filesystem so a malicious
+    // `//host/share` path cannot make `exists()`/`canonicalize()` open an SMB
+    // connection. A UNC path is only allowed when the user already opened a
+    // UNC workspace/trusted folder.
     let mut roots: Vec<PathBuf> = vec![state.app_data.clone()];
     if let Some(ws) = state.workspace.lock().ok().and_then(|g| g.clone()) {
         roots.push(ws);
@@ -134,17 +211,36 @@ pub fn validate_path(
             roots.extend(folders.iter().cloned());
         }
     }
-    if allow_trusted_asset_dirs {
-        if let Ok(files) = state.trusted_files.lock() {
-            for file in files.iter() {
-                if let Some(parent) = file.parent() {
-                    roots.push(real_path(&parent.join("assets")));
-                }
+    if is_unc_path(raw_path) {
+        let lexical = normalize_lexical(raw_path);
+        let mut allowed = roots.iter().any(|root| is_within_unc(&lexical, root));
+        if !allowed {
+            if let Ok(files) = state.trusted_files.lock() {
+                allowed = files.iter().any(|file| {
+                    (allow_trusted_files && is_same_unc(&lexical, file))
+                        || (allow_trusted_asset_dirs
+                            && file.parent().is_some_and(|parent| {
+                                is_within_unc(&lexical, &parent.join("assets"))
+                            }))
+                });
             }
+        }
+        if !allowed {
+            return None;
         }
     }
 
+    if must_exist && !raw_path.exists() {
+        return None;
+    }
+
+    let candidate = real_path(raw_path);
+
     if roots.iter().any(|root| is_within(&candidate, root)) {
+        return Some(candidate);
+    }
+
+    if allow_trusted_asset_dirs && is_assets_sibling_of_trusted_file(state, &candidate) {
         return Some(candidate);
     }
 
@@ -159,38 +255,23 @@ pub fn validate_path(
     None
 }
 
-/// Insert with a hard cap; oldest entries are approximated by arbitrary eviction
-/// (same behaviour as the previous Python implementation).
-fn capped_insert(set: &mut HashSet<PathBuf>, value: PathBuf, cap: usize) {
-    set.insert(value);
-    while set.len() > cap {
-        let victim = set.iter().next().cloned();
-        match victim {
-            Some(v) => {
-                set.remove(&v);
-            }
-            None => break,
-        }
-    }
-}
-
 pub fn remember_file(state: &AppState, path: &Path) {
     let real = real_path(path);
     if let Ok(mut files) = state.trusted_files.lock() {
-        capped_insert(&mut files, real, MAX_TRUSTED_FILES);
+        files.insert(real);
     }
     if let Ok(mut settings) = state.settings.lock() {
-        settings.add_recent_file(&display_path(path));
+        let _ = settings.add_recent_file(&display_path(path));
     }
 }
 
 pub fn remember_folder(state: &AppState, path: &Path) {
     let real = real_path(path);
     if let Ok(mut folders) = state.trusted_folders.lock() {
-        capped_insert(&mut folders, real, MAX_TRUSTED_FOLDERS);
+        folders.insert(real);
     }
     if let Ok(mut settings) = state.settings.lock() {
-        settings.add_recent_folder(&display_path(path));
+        let _ = settings.add_recent_folder(&display_path(path));
     }
 }
 
@@ -253,6 +334,83 @@ mod tests {
         let exts = [".png", ".jpg"];
         assert!(validate_filename("a.png", Some(&exts)).is_some());
         assert!(validate_filename("a.exe", Some(&exts)).is_none());
+    }
+
+    #[test]
+    fn rejects_webview_unc_and_device_paths() {
+        assert!(is_webview_unsafe_path("//server/share/file.md"));
+        assert!(is_webview_unsafe_path(r"\\?\C:\secret"));
+        assert!(is_webview_unsafe_path(r"\\.\pipe\name"));
+        assert!(is_webview_unsafe_path(r"\/server/share/file.md"));
+        assert!(is_webview_unsafe_path(r"/\server/share/file.md"));
+        // A Windows dialog returns UNC paths with backslashes; those are
+        // allowed to reach validate_path, which checks trusted roots.
+        assert!(!is_webview_unsafe_path(r"\\server\share\file.md"));
+        assert!(!is_webview_unsafe_path(r"C:\notes\file.md"));
+    }
+
+    #[test]
+    fn unc_roots_are_compared_case_insensitively() {
+        assert!(is_within_unc(
+            Path::new(r"\\SERVER\Share\notes\a.md"),
+            Path::new(r"\\server\share")
+        ));
+        assert!(!is_within_unc(
+            Path::new(r"\\server\share-other\a.md"),
+            Path::new(r"\\server\share")
+        ));
+    }
+
+    #[test]
+    fn trusted_paths_are_evicted_in_lru_order() {
+        use crate::state::TrustedPaths;
+
+        let mut set = TrustedPaths::new(3);
+        let file0 = PathBuf::from("C:/file-0.md");
+        let file1 = PathBuf::from("C:/file-1.md");
+        let file3 = PathBuf::from("C:/file-3.md");
+        set.insert(file0.clone());
+        set.insert(file1.clone());
+        set.insert(PathBuf::from("C:/file-2.md"));
+        // Touch file-0 so file-1 becomes the oldest entry.
+        set.insert(file0.clone());
+        set.insert(file3.clone());
+        assert!(set.contains(&file0));
+        assert!(!set.contains(&file1));
+        assert!(set.contains(&file3));
+        assert_eq!(set.iter().count(), 3);
+    }
+
+    #[test]
+    fn assets_directory_is_allowed_for_a_trusted_document() {
+        use crate::state::AppState;
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("markview-assets-{}-{stamp}", std::process::id()));
+        let assets = root.join("assets");
+        std::fs::create_dir_all(&assets).expect("assets dir");
+        let state = AppState::new(root.join("app-data"));
+        let doc = root.join("doc.md");
+        state
+            .trusted_files
+            .lock()
+            .expect("trusted")
+            .insert(real_path(&doc));
+
+        assert!(is_assets_sibling_of_trusted_file(&state, &assets));
+        assert!(is_assets_sibling_of_trusted_file(
+            &state,
+            &assets.join("img.png")
+        ));
+        assert!(!is_assets_sibling_of_trusted_file(
+            &state,
+            &root.join("other").join("img.png")
+        ));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(windows)]

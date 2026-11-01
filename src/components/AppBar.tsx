@@ -94,7 +94,9 @@ export function AppBar() {
       <button
         className="search-pill"
         title="Quick open (Ctrl+P)"
-        onClick={() => useStore.setState({ quickOpenOpen: true })}
+        onClick={() =>
+          useStore.setState({ quickOpenOpen: true, quickOpenMode: "files" })
+        }
       >
         <IconSearch />
         <span>Search files</span>

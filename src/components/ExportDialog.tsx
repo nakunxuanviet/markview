@@ -46,13 +46,21 @@ export function ExportDialog() {
       const html = await buildExportHtml({ theme, includeToc });
       const path = await pickSavePath(filename);
       if (!path) return;
-      const result = await api.saveFileAs(path, html, "UTF-8", false, "lf");
+      const result = await api.saveFileAs(
+        path,
+        html,
+        "UTF-8",
+        false,
+        "lf",
+        false,
+      );
       if (!result?.success) {
         toast.show(result?.message ?? result?.error ?? "Export failed", {
           type: "error",
         });
         return;
       }
+      void useStore.getState().refreshTree();
       toast.show(`Exported ${filename}`, {
         type: "success",
         duration: 2500,

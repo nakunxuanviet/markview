@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import { api } from "../api";
@@ -40,7 +40,11 @@ function iconClass(name: string): string {
   if (["doc", "docx"].includes(ext)) return "file-doc";
   if (["xls", "xlsx", "csv"].includes(ext)) return "file-xls";
   if (ext === "pdf") return "file-pdf";
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext))
+  if (
+    ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif", "ico"].includes(
+      ext,
+    )
+  )
     return "file-img";
   return "file-default";
 }
@@ -91,33 +95,38 @@ export function Sidebar() {
   const visibleExtensions = useStore(
     (state) => state.settings.files.visible_extensions,
   );
+  const folderLabelSegments = useStore(
+    (state) => state.settings.files.folder_label_segments,
+  );
   const version = useAppVersion();
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FileHit[]>([]);
   const [draggingPath, setDraggingPath] = useState<string | null>(null);
-  const searchTimer = useRef<number | undefined>(undefined);
   const welcomeShown = showWelcome && !workspace;
 
   const store = useStore.getState();
-  const extraActive = visibleExtensions.length > CORE_EXTENSIONS.length;
+  const extraActive = visibleExtensions.some(
+    (ext) => !CORE_EXTENSIONS.includes(ext) && ALL_EXTENSIONS.includes(ext),
+  );
 
   useEffect(() => {
+    let cancelled = false;
     if (!query.trim()) {
       setResults([]);
       return;
     }
-    if (searchTimer.current) window.clearTimeout(searchTimer.current);
-    searchTimer.current = window.setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       try {
         const hits = await api.searchFilenames(query.trim());
-        setResults(hits ?? []);
+        if (!cancelled) setResults(hits ?? []);
       } catch {
-        setResults([]);
+        if (!cancelled) setResults([]);
       }
     }, 150);
     return () => {
-      if (searchTimer.current) window.clearTimeout(searchTimer.current);
+      cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [query]);
 
@@ -129,14 +138,18 @@ export function Sidebar() {
           .replace(/\\/g, "/")
           .split("/")
           .filter(Boolean);
-        const count =
-          useStore.getState().settings.files.folder_label_segments || 2;
+        const count = folderLabelSegments || 2;
         return segments.slice(-count).join("/");
       })()
     : "No folder opened";
 
   const toggleExtraFiles = async () => {
-    const next = extraActive ? CORE_EXTENSIONS : ALL_EXTENSIONS;
+    const standardExtras = new Set(ALL_EXTENSIONS);
+    const next = extraActive
+      ? visibleExtensions.filter(
+          (ext) => !standardExtras.has(ext) || CORE_EXTENSIONS.includes(ext),
+        )
+      : Array.from(new Set([...visibleExtensions, ...ALL_EXTENSIONS]));
     await store.updateSettings({ files: { visible_extensions: next } });
     await store.refreshTree();
   };
@@ -526,6 +539,7 @@ function TreeItem({
         className={`tree-item${isActive ? " active" : ""}`}
         style={{ paddingLeft: 8 + depth * 12 }}
         title={node.path}
+        data-tree-path={node.path}
         draggable
         onDragStart={(event) => {
           onDragPath(node.path);
@@ -619,7 +633,29 @@ function Outline({
             key={`${heading.line}-${index}`}
             className={`outline-item outline-h${heading.level}`}
             title={heading.text}
-            onClick={() => editorRef.scrollToLine?.(heading.line + 1)}
+            onClick={() => {
+              const store = useStore.getState();
+              const readMode =
+                store.viewMode === "single" && store.singleView === "preview";
+              if (readMode) {
+                const target = Array.from(
+                  document.querySelectorAll<HTMLElement>(
+                    "#preview-content h1, #preview-content h2, #preview-content h3, #preview-content h4, #preview-content h5, #preview-content h6",
+                  ),
+                ).find((element) => {
+                  const sourcepos = element.dataset.sourcepos;
+                  return (
+                    sourcepos &&
+                    Number(sourcepos.split(":")[0]) === heading.line + 1
+                  );
+                });
+                if (target) {
+                  target.scrollIntoView({ behavior: "smooth", block: "start" });
+                  return;
+                }
+              }
+              editorRef.scrollToLine?.(heading.line + 1);
+            }}
           >
             <span className="o-level">H{heading.level}</span>
             <span className="o-text">{heading.text}</span>

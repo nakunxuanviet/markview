@@ -10,7 +10,6 @@ use tauri::{AppHandle, State};
 use crate::files;
 use crate::folders::{self, ScanConfig};
 use crate::markdown;
-use crate::prefs::get_path;
 use crate::search::{self, SearchOptions};
 use crate::security::{
     display_path, real_path, remember_file, remember_folder, set_workspace, validate_filename,
@@ -20,7 +19,9 @@ use crate::state::AppState;
 use crate::watcher;
 
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
-const IMAGE_EXTENSIONS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"];
+const IMAGE_EXTENSIONS: &[&str] = &[
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif", ".ico",
+];
 
 fn err(message: impl Into<String>) -> Value {
     json!({ "error": message.into() })
@@ -46,7 +47,12 @@ fn scan_config(state: &AppState) -> ScanConfig {
 fn start_watcher(app: &AppHandle, state: &AppState, folder: &Path) {
     if let Ok(mut guard) = state.watcher.lock() {
         *guard = None;
-        match watcher::start(app.clone(), folder.to_path_buf()) {
+        let show_hidden = state
+            .settings
+            .lock()
+            .map(|settings| settings.get_bool_or("files.show_hidden_files", false))
+            .unwrap_or(false);
+        match watcher::start(app.clone(), folder.to_path_buf(), show_hidden) {
             Ok(handle) => *guard = Some(handle),
             Err(e) => eprintln!(
                 "[markview] watcher failed for {}: {e}",
@@ -71,6 +77,11 @@ fn tree_result(state: &AppState, path: &Path, expanded: &[String]) -> Value {
 
 #[tauri::command(async)]
 pub fn open_folder_path(app: AppHandle, state: State<'_, AppState>, path: String) -> Value {
+    if crate::security::is_webview_unsafe_path(&path)
+        && validate_path(&state, &path, true, true, false, true).is_none()
+    {
+        return err("Invalid path");
+    }
     let raw = PathBuf::from(&path);
     if !raw.is_dir() {
         return err("Folder not found");
@@ -109,7 +120,7 @@ pub fn get_folder_children(state: State<'_, AppState>, path: String) -> Value {
     json!(folders::get_tree(&valid, &cfg, 0))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_file(state: State<'_, AppState>, folder: String, name: String) -> Value {
     let Some(valid) = validate_path(&state, &folder, false, false, false, true) else {
         return err("Invalid path");
@@ -117,7 +128,7 @@ pub fn create_file(state: State<'_, AppState>, folder: String, name: String) -> 
     folders::create_file(&valid, &name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_folder(state: State<'_, AppState>, parent: String, name: String) -> Value {
     let Some(valid) = validate_path(&state, &parent, false, false, false, true) else {
         return err("Invalid path");
@@ -125,7 +136,7 @@ pub fn create_folder(state: State<'_, AppState>, parent: String, name: String) -
     folders::create_folder(&valid, &name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_item(state: State<'_, AppState>, old_path: String, new_name: String) -> Value {
     let Some(valid) = validate_path(&state, &old_path, false, false, false, false) else {
         return err("Invalid path");
@@ -133,7 +144,7 @@ pub fn rename_item(state: State<'_, AppState>, old_path: String, new_name: Strin
     folders::rename(&valid, &new_name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_item(state: State<'_, AppState>, path: String) -> Value {
     let Some(valid) = validate_path(&state, &path, false, false, false, false) else {
         return err("Invalid path");
@@ -141,7 +152,7 @@ pub fn delete_item(state: State<'_, AppState>, path: String) -> Value {
     folders::delete(&valid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn duplicate_file(state: State<'_, AppState>, path: String) -> Value {
     let Some(valid) = validate_path(&state, &path, false, false, false, false) else {
         return err("Invalid path");
@@ -149,7 +160,7 @@ pub fn duplicate_file(state: State<'_, AppState>, path: String) -> Value {
     folders::duplicate(&valid)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_item(state: State<'_, AppState>, src: String, dest_folder: String) -> Value {
     let (Some(src_valid), Some(dest_valid)) = (
         validate_path(&state, &src, false, false, false, false),
@@ -169,10 +180,70 @@ pub fn search_filenames(state: State<'_, AppState>, query: String) -> Value {
     json!(folders::search_filenames(&root, &query, &cfg))
 }
 
+/// Open a link from a document. The target may live below the document's own
+/// folder, or in a workspace/trusted root; an absolute link cannot escape to an
+/// arbitrary file on disk.
+#[tauri::command(async)]
+pub fn open_file_link(state: State<'_, AppState>, base: String, path: String) -> Value {
+    let Some(base_valid) = validate_path(&state, &base, true, true, false, true) else {
+        return err("Document is not trusted");
+    };
+    if crate::security::is_webview_unsafe_path(&path)
+        && validate_path(&state, &path, true, true, true, true).is_none()
+    {
+        return err("Invalid path");
+    }
+    let raw = Path::new(&path);
+    if !raw.is_absolute() || !raw.is_file() {
+        return err("File not found");
+    }
+    let target = real_path(raw);
+    let Some(base_dir) = base_valid.parent() else {
+        return err("Invalid document path");
+    };
+    let trusted = validate_path(&state, &path, true, true, true, true).is_some();
+    if !crate::security::is_within(&target, base_dir) && !trusted {
+        return err("Link points outside the document folder");
+    }
+    remember_file(&state, &target);
+    files::read_file_data(&target)
+}
+
+/// Lightweight metadata probe for open tabs. The full watcher only watches the
+/// workspace, so files opened outside it are checked when the window regains
+/// focus.
+#[tauri::command(async)]
+pub fn file_mtimes(state: State<'_, AppState>, paths: Vec<String>) -> Value {
+    let mut out = serde_json::Map::new();
+    for path in paths.into_iter().take(200) {
+        let Some(valid) = validate_path(&state, &path, true, true, false, false) else {
+            continue;
+        };
+        let metadata = std::fs::metadata(&valid);
+        let exists = metadata
+            .as_ref()
+            .map(|value| value.is_file())
+            .unwrap_or(false);
+        out.insert(
+            path,
+            json!({
+                "exists": exists,
+                "modified_ms": files::modified_ms_for_path(&valid),
+            }),
+        );
+    }
+    json!(out)
+}
+
 // === FILE I/O ===
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_file_path(state: State<'_, AppState>, path: String) -> Value {
+    if crate::security::is_webview_unsafe_path(&path)
+        && validate_path(&state, &path, true, true, false, true).is_none()
+    {
+        return err("Invalid path");
+    }
     let raw = PathBuf::from(&path);
     if !raw.is_file() {
         return err("File not found");
@@ -182,7 +253,7 @@ pub fn open_file_path(state: State<'_, AppState>, path: String) -> Value {
     files::read_file_data(&real)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_file(
     state: State<'_, AppState>,
     path: String,
@@ -190,10 +261,28 @@ pub fn save_file(
     encoding: Option<String>,
     bom: Option<bool>,
     line_ending: Option<String>,
+    expected_modified_ms: Option<u64>,
 ) -> Value {
     let Some(valid) = validate_path(&state, &path, true, false, false, false) else {
         return err("Invalid path");
     };
+    if let Some(expected) = expected_modified_ms {
+        if !valid.exists() {
+            return json!({
+                "error": "missing",
+                "message": "File was removed from disk. Saving will recreate it."
+            });
+        }
+        if let Some(current) = files::modified_ms_for_path(&valid) {
+            if current != expected {
+                return json!({
+                    "error": "conflict",
+                    "message": "File changed on disk since it was opened.",
+                    "modified_ms": current,
+                });
+            }
+        }
+    }
     let result = files::write_file_data(
         &valid,
         &content,
@@ -208,7 +297,7 @@ pub fn save_file(
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_file_as(
     state: State<'_, AppState>,
     path: String,
@@ -216,7 +305,11 @@ pub fn save_file_as(
     encoding: Option<String>,
     bom: Option<bool>,
     line_ending: Option<String>,
+    remember: Option<bool>,
 ) -> Value {
+    if crate::security::is_webview_unsafe_path(&path) {
+        return err("Invalid path");
+    }
     let raw = PathBuf::from(&path);
     if !raw.is_absolute() {
         return err("Invalid path");
@@ -230,7 +323,9 @@ pub fn save_file_as(
     );
     if result.get("success").and_then(Value::as_bool) == Some(true) {
         watcher::note_self_write(&raw);
-        remember_file(&state, &raw);
+        if remember.unwrap_or(true) {
+            remember_file(&state, &raw);
+        }
     }
     result
 }
@@ -272,7 +367,7 @@ pub fn save_session(state: State<'_, AppState>, data: Value) -> bool {
 }
 
 #[tauri::command(async)]
-pub fn load_session(state: State<'_, AppState>) -> Value {
+pub fn load_session(app: AppHandle, state: State<'_, AppState>) -> Value {
     let session = match state.session.lock() {
         Ok(session) => session.load(),
         Err(_) => None,
@@ -293,6 +388,7 @@ pub fn load_session(state: State<'_, AppState>) -> Value {
             if let Ok(mut folders) = state.trusted_folders.lock() {
                 folders.insert(real.clone());
             }
+            start_watcher(&app, &state, &real);
             let cfg = scan_config(&state);
             let tree = folders::get_tree(&real, &cfg, 1);
             if let Some(obj) = session.as_object_mut() {
@@ -337,18 +433,20 @@ pub fn load_session(state: State<'_, AppState>) -> Value {
     session
 }
 
-#[tauri::command]
-pub fn backup_tab(state: State<'_, AppState>, tab_id: String, content: String) {
-    if let Ok(session) = state.session.lock() {
-        let _ = session.write_backup(&tab_id, &content);
-    }
-}
-
 // === MARKDOWN ===
 
 #[tauri::command(async)]
 pub fn render_markdown(text: String) -> Value {
     markdown::render(&text)
+}
+
+/// Restart the workspace watcher after a setting that changes which paths are
+/// considered visible (currently `show_hidden_files`).
+#[tauri::command(async)]
+pub fn restart_watcher(app: AppHandle, state: State<'_, AppState>) {
+    if let Some(folder) = workspace(&state) {
+        start_watcher(&app, &state, &folder);
+    }
 }
 
 // === SETTINGS ===
@@ -367,17 +465,14 @@ pub fn save_settings(state: State<'_, AppState>, data: Value) -> bool {
         return false;
     }
     match state.settings.lock() {
-        Ok(mut settings) => {
-            settings.update(&data);
-            true
-        }
+        Ok(mut settings) => settings.update(&data),
         Err(_) => false,
     }
 }
 
 // === IMAGE ===
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_image(
     state: State<'_, AppState>,
     dest_folder: String,
@@ -405,8 +500,11 @@ pub fn save_image(
 }
 
 /// Copy a dropped image into the active document's `assets/` folder.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_image(state: State<'_, AppState>, source: String, folder: String) -> Value {
+    if crate::security::is_webview_unsafe_path(&source) {
+        return err("Invalid image path");
+    }
     let from = PathBuf::from(&source);
     if !from.is_file() {
         return err("Image not found");
@@ -455,7 +553,7 @@ pub fn import_image(state: State<'_, AppState>, source: String, folder: String) 
 
 // === REVEAL ===
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reveal_in_explorer(state: State<'_, AppState>, path: String) -> Value {
     let Some(valid) = validate_path(&state, &path, true, false, false, true) else {
         return err("Invalid path");
@@ -516,21 +614,22 @@ pub fn search_in_files(
     };
 
     let opts = options.unwrap_or_default();
-    let outcome = match state.settings.lock() {
-        Ok(settings) => search::search_in_files_cancellable(
-            &root,
-            &query,
-            search_root.as_deref(),
-            &settings,
-            &opts,
-            &state.search_request,
-            request_id,
-        ),
-        Err(_) => search::SearchOutcome {
-            hits: Vec::new(),
-            cancelled: false,
-        },
+    // Snapshot the settings the search needs, then release the lock before
+    // touching the filesystem. Holding it would block every save/open command
+    // (and the UI thread) for the whole duration of the search.
+    let config = match state.settings.lock() {
+        Ok(settings) => search::SearchConfig::from_settings(&settings),
+        Err(_) => search::SearchConfig::default(),
     };
+    let outcome = search::search_in_files_cancellable(
+        &root,
+        &query,
+        search_root.as_deref(),
+        &config,
+        &opts,
+        &state.search_request,
+        request_id,
+    );
     json!({
         "request_id": request_id,
         "cancelled": outcome.cancelled,
@@ -543,49 +642,15 @@ pub fn cancel_search(state: State<'_, AppState>) {
     state.search_request.store(u64::MAX, Ordering::Relaxed);
 }
 
-// === SESSION RESTORE ===
-
-/// Re-establish workspace + file trust after a restart, then return a fresh
-/// folder tree. Restored session tabs can then be saved again.
-#[tauri::command(async)]
-pub fn restore_workspace(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    folder: Option<String>,
-    files: Vec<String>,
-) -> Value {
-    let mut tree = Value::Null;
-    let mut workspace_path = Value::Null;
-
-    if let Some(folder) = folder {
-        let raw = PathBuf::from(&folder);
-        if raw.is_dir() {
-            let real = real_path(&raw);
-            set_workspace(&state, &real);
-            remember_folder(&state, &real);
-            start_watcher(&app, &state, &real);
-            let cfg = scan_config(&state);
-            tree = json!(folders::get_tree(&real, &cfg, 1));
-            workspace_path = json!(display_path(&real));
-        }
-    }
-
-    for file in files {
-        let raw = PathBuf::from(&file);
-        if raw.is_file() {
-            remember_file(&state, &raw);
-        }
-    }
-
-    json!({ "workspace": workspace_path, "tree": tree })
-}
-
 // === UTILITIES ===
 
 /// Lightweight path probe used by drag & drop. Only reports the kind of an
 /// existing path; it never reads or writes anything.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn path_kind(path: String) -> String {
+    if crate::security::is_webview_unsafe_path(&path) {
+        return "missing".to_string();
+    }
     let candidate = Path::new(&path);
     if candidate.is_dir() {
         "directory".to_string()
@@ -758,6 +823,13 @@ fn force_titlebar_repaint(hwnd: isize) {
     }
 }
 
+/// Completes the close handshake after the webview has flushed its session.
+#[tauri::command]
+pub fn confirm_close(window: tauri::Window, state: State<'_, AppState>) {
+    state.allow_close.store(true, Ordering::SeqCst);
+    let _ = window.close();
+}
+
 /// Keeps the native window chrome in step with the in-app theme.
 #[tauri::command]
 pub fn set_window_theme(window: tauri::Window, theme: String) -> Result<(), String> {
@@ -782,14 +854,4 @@ pub fn set_window_theme(window: tauri::Window, theme: String) -> Result<(), Stri
     Ok(())
 }
 
-// === SETTINGS HELPERS (used by the frontend settings dialog) ===
-
-#[tauri::command]
-pub fn get_setting(state: State<'_, AppState>, key_path: String) -> Value {
-    match state.settings.lock() {
-        Ok(settings) => get_path(&settings.all(), &key_path)
-            .cloned()
-            .unwrap_or(Value::Null),
-        Err(_) => Value::Null,
-    }
-}
+// === SETTINGS HELPERS ===

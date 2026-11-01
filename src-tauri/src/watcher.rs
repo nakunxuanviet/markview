@@ -68,14 +68,23 @@ impl Drop for WatcherHandle {
     }
 }
 
-fn should_ignore(path: &Path) -> bool {
-    path.components().any(|c| {
+fn should_ignore(path: &Path, root: &Path, show_hidden: bool) -> bool {
+    // Only components below the workspace root matter. Checking the root
+    // itself made every event disappear when the workspace lived in a hidden
+    // folder such as `C:\Users\me\.notes`.
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative.components().any(|c| {
         let part = c.as_os_str().to_string_lossy();
-        part.starts_with('.') || IGNORED.contains(&part.as_ref())
+        (!show_hidden && part.starts_with('.')) || IGNORED.contains(&part.as_ref())
     })
 }
 
-fn collect(event: Event, pending: &mut HashMap<(String, String), Value>) {
+fn collect(
+    event: Event,
+    pending: &mut HashMap<(String, String), Value>,
+    root: &Path,
+    show_hidden: bool,
+) {
     if matches!(
         event.kind,
         EventKind::Modify(notify::event::ModifyKind::Name(_))
@@ -83,7 +92,7 @@ fn collect(event: Event, pending: &mut HashMap<(String, String), Value>) {
     {
         let old = &event.paths[0];
         let new = &event.paths[1];
-        if should_ignore(old) && should_ignore(new) {
+        if should_ignore(old, root, show_hidden) && should_ignore(new, root, show_hidden) {
             return;
         }
         let payload = json!({
@@ -105,7 +114,7 @@ fn collect(event: Event, pending: &mut HashMap<(String, String), Value>) {
     };
 
     for path in event.paths {
-        if should_ignore(&path) {
+        if should_ignore(&path, root, show_hidden) {
             continue;
         }
         let is_dir = path.is_dir();
@@ -118,7 +127,7 @@ fn collect(event: Event, pending: &mut HashMap<(String, String), Value>) {
     }
 }
 
-pub fn start(app: AppHandle, root: PathBuf) -> Result<WatcherHandle, String> {
+pub fn start(app: AppHandle, root: PathBuf, show_hidden: bool) -> Result<WatcherHandle, String> {
     let (tx, rx) = channel();
     let mut watcher = notify::recommended_watcher(move |res| {
         let _ = tx.send(res);
@@ -142,7 +151,7 @@ pub fn start(app: AppHandle, root: PathBuf) -> Result<WatcherHandle, String> {
             }
             match rx.recv_timeout(Duration::from_millis(120)) {
                 Ok(Ok(event)) => {
-                    collect(event, &mut pending);
+                    collect(event, &mut pending, &root, show_hidden);
                     last_event = Instant::now();
                 }
                 Ok(Err(_)) => {}
@@ -172,4 +181,23 @@ pub fn start(app: AppHandle, root: PathBuf) -> Result<WatcherHandle, String> {
         _watcher: watcher,
         stop,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hidden_workspace_root_does_not_hide_its_children() {
+        let root = Path::new("C:/Users/me/.notes");
+        assert!(!should_ignore(&root.join("a.md"), root, false));
+        assert!(should_ignore(&root.join(".secret"), root, false));
+        assert!(!should_ignore(&root.join(".secret"), root, true));
+        assert!(should_ignore(&root.join(".git/config"), root, true));
+        assert!(should_ignore(
+            &root.join("node_modules/pkg/a.js"),
+            root,
+            true
+        ));
+    }
 }

@@ -339,16 +339,6 @@ export function EditorPane() {
       publishStatus(view, true);
     };
 
-    editorRef.restore = (cursor: number, scrollTop: number) => {
-      const max = view.state.doc.length;
-      const anchor = Math.max(0, Math.min(cursor, max));
-      view.dispatch({ selection: { anchor } });
-      view.scrollDOM.scrollTop = scrollTop;
-      publishStatus(view, true);
-    };
-
-    editorRef.getCursor = () => view.state.selection.main.head;
-    editorRef.getScroll = () => view.scrollDOM.scrollTop;
     editorRef.focus = () => view.focus();
     editorRef.scrollToLine = (line: number) => {
       const docLine = view.state.doc.line(
@@ -394,9 +384,6 @@ export function EditorPane() {
       registerEditorScroller(null);
       editorRef.view = null;
       editorRef.setDoc = undefined;
-      editorRef.restore = undefined;
-      editorRef.getCursor = undefined;
-      editorRef.getScroll = undefined;
       editorRef.focus = undefined;
       editorRef.scrollToLine = undefined;
       editorRef.insertText = undefined;
@@ -557,6 +544,16 @@ async function handleImagePaste(event: ClipboardEvent): Promise<void> {
     const result = await api.saveImage(folder, filename, base64);
     if (result?.error) {
       toast.show(result.error, { type: "error" });
+      return;
+    }
+    const current = useStore.getState();
+    if (
+      current.activeId !== tab.id ||
+      current.tabs[tab.id]?.path !== tab.path
+    ) {
+      toast.show("Image saved, but the active tab changed before insertion.", {
+        type: "warn",
+      });
       return;
     }
     editorRef.insertText?.(`![${filename}](assets/${filename})`);
